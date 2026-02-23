@@ -6,9 +6,9 @@ use Apiura\Http\Requests\StoreSavedApiRequestRequest;
 use Apiura\Http\Requests\UpdateSavedApiRequestRequest;
 use Apiura\Http\Resources\SavedApiRequestResource;
 use Apiura\Models\SavedApiRequest;
+use Illuminate\Routing\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\DB;
 
 class SavedApiRequestController extends Controller

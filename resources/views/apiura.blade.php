@@ -809,7 +809,8 @@
                     <template x-for="tab in openTabs" :key="tab.id">
                         <div class="tab-item flex items-center h-full px-3 gap-2 border-r border-ide-border cursor-pointer text-xs whitespace-nowrap select-none"
                             :class="activeTabId === tab.id ? 'bg-ide-tab-active text-ide-fg border-t-2 border-t-ide-primary' : 'bg-ide-tab-inactive text-ide-muted hover:bg-ide-line-active'"
-                            @click="switchToTab(tab.id)">
+                            @click="switchToTab(tab.id)"
+                            @auxclick.prevent="if ($event.button === 1) closeTab(tab.id)">
                             <span class="px-1 py-0.5 text-[9px] font-bold rounded uppercase" :class="'badge-' + tab.method.toLowerCase()" x-text="tab.method"></span>
                             <span class="font-mono text-[11px]" x-text="tab.path.split('/').slice(-2).join('/')"></span>
                             <button class="tab-close ml-1 p-0.5 rounded hover:bg-ide-border" @click.stop="closeTab(tab.id)">
@@ -823,28 +824,45 @@
                     </div>
                 </div>
 
-                <!-- Auth Bar (compact) -->
+                <!-- Auth Bar (compact) — Session Pills -->
                 <div class="px-3 py-1.5 bg-ide-surface border-b border-ide-border flex items-center gap-2 text-xs flex-shrink-0" x-show="selectedEndpoint">
-                    <!-- Auth Status -->
-                    <div class="flex items-center gap-2">
-                        <template x-if="authToken">
-                            <div class="flex items-center gap-1.5">
-                                <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
-                                <span class="text-ide-muted">Authenticated</span>
-                                <code class="text-[10px] text-ide-muted font-mono" x-text="'Bearer ' + authToken.substring(0, 16) + '...'"></code>
-                                <button @click="logout()" class="text-red-400 hover:text-red-300 ml-1">Logout</button>
+                    <!-- Session Pills -->
+                    <div class="flex items-center gap-1.5 flex-wrap min-w-0">
+                        <template x-for="session in authSessions" :key="session.id">
+                            <div class="flex items-center gap-1 px-2 py-0.5 rounded-full border cursor-pointer transition-all"
+                                :class="getSessionColorClasses(session.color, activeSessionId === session.id ? 'pillActive' : 'pill')"
+                                @click="activeSessionId = session.id">
+                                <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="getSessionColorClasses(session.color, 'dot')"></span>
+                                <span class="truncate max-w-20" x-text="session.label"></span>
+                                <button @click.stop="removeSession(session.id)" class="ml-0.5 opacity-60 hover:opacity-100 text-current" title="Remove session">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                </button>
                             </div>
                         </template>
-                        <template x-if="!authToken">
+                        <!-- No sessions indicator -->
+                        <template x-if="authSessions.length === 0">
                             <div class="flex items-center gap-1.5">
                                 <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>
-                                <span class="text-ide-muted">Not authenticated</span>
-                                <button @click="showLoginForm = !showLoginForm" class="text-ide-primary hover:underline ml-1" x-text="showLoginForm ? 'Hide' : 'Auth'"></button>
+                                <span class="text-ide-muted">No auth</span>
                             </div>
                         </template>
+                        <!-- Add Session button -->
+                        <button @click="showLoginForm = !showLoginForm" class="flex items-center gap-0.5 px-2 py-0.5 rounded-full border border-dashed border-ide-border text-ide-muted hover:text-ide-fg hover:border-ide-fg transition-colors">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                            <span>Login</span>
+                        </button>
+                        <!-- Manage Sessions button -->
+                        <button x-show="authSessions.length > 0" @click="showSessionManager = true" class="text-ide-muted hover:text-ide-fg p-0.5" title="Manage Sessions">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
+                        </button>
+                    </div>
+                    <!-- Effective Session Indicator -->
+                    <div x-show="authSessions.length > 0 && selectedEndpoint" class="flex items-center gap-1 text-[10px] text-ide-muted ml-1">
+                        <span>Using:</span>
+                        <span class="font-medium" :class="getEffectiveSession() ? getSessionColorClasses(getEffectiveSession()?.color, 'pill').split(' ').find(c => c.startsWith('text-')) : 'text-red-400'" x-text="getEffectiveSessionLabel()"></span>
                     </div>
                     <!-- Auth Form (inline) -->
-                    <div x-show="showLoginForm && !authToken" class="flex items-center gap-2 ml-2" x-cloak>
+                    <div x-show="showLoginForm" class="flex items-center gap-2 ml-2" x-cloak>
                         <!-- Mode Toggle -->
                         <div class="flex bg-ide-border rounded p-0.5">
                             <button @click="authMode = 'token'" class="px-2 py-0.5 text-[10px] font-medium rounded transition-colors" :class="authMode === 'token' ? 'bg-ide-surface text-ide-fg shadow-sm' : 'text-ide-muted hover:text-ide-fg'">Token</button>
@@ -860,6 +878,15 @@
                         <!-- Login Form -->
                         <template x-if="authMode === 'login'">
                             <div class="flex items-center gap-1.5">
+                                <!-- Login Path Selector -->
+                                <select x-model="selectedLoginPath" x-show="detectedLoginPaths.length > 1"
+                                    class="px-2 py-1 text-xs border border-ide-border rounded bg-ide-bg text-ide-fg max-w-44 font-mono"
+                                    :title="selectedLoginPath">
+                                    <template x-for="lp in detectedLoginPaths" :key="lp.path">
+                                        <option :value="lp.path" x-text="lp.path + (lp.summary ? ' - ' + lp.summary : lp.tags.length ? ' (' + lp.tags.join(', ') + ')' : '')"></option>
+                                    </template>
+                                </select>
+                                <span x-show="detectedLoginPaths.length === 1" class="text-[10px] text-ide-muted font-mono px-1 truncate max-w-32" :title="selectedLoginPath" x-text="selectedLoginPath"></span>
                                 <input type="text" x-model="loginEmail" placeholder="Email" class="px-2 py-1 text-xs border border-ide-border rounded bg-ide-bg text-ide-fg w-36" :class="{ 'border-red-400': loginError }">
                                 <input type="password" x-model="loginPassword" placeholder="Password" @keydown.enter="performLogin()" class="px-2 py-1 text-xs border border-ide-border rounded bg-ide-bg text-ide-fg w-28" :class="{ 'border-red-400': loginError }">
                                 <button @click="performLogin()" :disabled="loginLoading" class="px-2 py-1 text-xs bg-ide-primary text-white rounded hover:opacity-90 disabled:opacity-50 flex items-center gap-1">
@@ -938,6 +965,35 @@
                             <div class="flex items-center gap-2 px-4 py-2 border-b border-ide-border bg-ide-bg flex-shrink-0">
                                 <span :class="getMethodBadgeClass(selectedEndpoint.method)" class="px-2 py-1 text-xs font-bold rounded uppercase flex-shrink-0" x-text="selectedEndpoint.method"></span>
                                 <code class="flex-1 text-ui font-mono text-ide-fg truncate" x-text="builtUrl || getFullPath(selectedEndpoint.path)"></code>
+                                <!-- Per-Request Session Picker -->
+                                <div x-show="authSessions.length > 0" class="relative flex-shrink-0" x-data="{ sessionPickerOpen: false }" @click.away="sessionPickerOpen = false">
+                                    <button @click="sessionPickerOpen = !sessionPickerOpen" class="flex items-center gap-1 px-2 py-1.5 rounded border border-ide-border text-xs hover:bg-ide-line-active transition-colors" :title="'Auth: ' + getEffectiveSessionLabel()">
+                                        <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="getEffectiveSession() ? getSessionColorClasses(getEffectiveSession()?.color, 'dot') : 'bg-gray-500'"></span>
+                                        <span class="max-w-16 truncate" x-text="getEffectiveSessionLabel()"></span>
+                                        <svg class="w-3 h-3 text-ide-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                                    </button>
+                                    <!-- Dropdown -->
+                                    <div x-show="sessionPickerOpen" x-transition class="absolute right-0 top-full mt-1 w-56 bg-ide-surface border border-ide-border rounded-lg shadow-xl z-30 py-1" x-cloak>
+                                        <button @click="sessionOverrideId = null; sessionPickerOpen = false" class="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-ide-line-active text-left transition-colors" :class="!sessionOverrideId ? 'text-ide-primary' : 'text-ide-fg'">
+                                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                                            <span>Auto-detect</span>
+                                            <span x-show="!sessionOverrideId" class="ml-auto text-[10px] text-ide-muted">active</span>
+                                        </button>
+                                        <div class="border-t border-ide-border my-1"></div>
+                                        <template x-for="session in authSessions" :key="session.id">
+                                            <button @click="sessionOverrideId = session.id; sessionPickerOpen = false" class="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-ide-line-active text-left transition-colors" :class="sessionOverrideId === session.id ? 'text-ide-primary' : 'text-ide-fg'">
+                                                <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="getSessionColorClasses(session.color, 'dot')"></span>
+                                                <span class="truncate" x-text="session.label"></span>
+                                                <span x-show="session.email" class="text-[10px] text-ide-muted truncate ml-auto" x-text="session.email"></span>
+                                            </button>
+                                        </template>
+                                        <div class="border-t border-ide-border my-1"></div>
+                                        <button @click="sessionOverrideId = '__none__'; sessionPickerOpen = false" class="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-ide-line-active text-left transition-colors" :class="sessionOverrideId === '__none__' ? 'text-red-400' : 'text-ide-muted'">
+                                            <span class="w-1.5 h-1.5 rounded-full bg-gray-500 flex-shrink-0"></span>
+                                            <span>No Auth</span>
+                                        </button>
+                                    </div>
+                                </div>
                                 <!-- Send Button -->
                                 <button
                                     @click="sendRequest()"
@@ -1966,7 +2022,11 @@
                 </div>
             </template>
             <div class="ml-auto flex items-center gap-3">
-                <span x-show="authToken" class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-green-400"></span> Auth</span>
+                <span x-show="authSessions.length > 0" class="flex items-center gap-1">
+                    <span class="w-1.5 h-1.5 rounded-full" :class="getEffectiveSession() ? getSessionColorClasses(getEffectiveSession()?.color, 'dot') : 'bg-gray-400'"></span>
+                    <span x-text="getEffectiveSessionLabel()"></span>
+                    <span class="opacity-60" x-text="'(' + authSessions.length + ')'"></span>
+                </span>
                 <span x-text="currentEnvironment === 'default' ? 'Default Env' : environments.find(e => e.id === currentEnvironment)?.name || 'Default Env'"></span>
                 <button @click="showShortcuts = true" class="hover:text-white" title="Keyboard Shortcuts">
                     <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707"/></svg>
@@ -2789,16 +2849,24 @@
         style="left: 48px; bottom: 24px"
         x-cloak
     >
-        <!-- Top Bar -->
+        <!-- Header Row - Clean top bar -->
         <div class="h-11 border-b border-ide-border flex items-center justify-between px-4 flex-shrink-0">
-            <div class="flex items-center gap-3">
-                <h1 class="text-sm font-semibold text-ide-fg">Request Flows</h1>
+            <div class="flex items-center gap-2 min-w-0">
                 <template x-if="editingFlow || isCreatingFlow">
-                    <span class="text-[11px] text-ide-muted truncate max-w-[200px]" x-text="newFlow.name || 'Untitled Flow'"></span>
+                    <button @click="editingFlow = null; isCreatingFlow = false"
+                            class="p-1 text-ide-muted hover:text-ide-fg hover:bg-ide-line-active rounded-md transition-colors flex-shrink-0" title="Back to flows list">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                    </button>
+                </template>
+                <h1 class="text-sm font-semibold text-ide-fg flex-shrink-0">Request Flows</h1>
+                <template x-if="editingFlow || isCreatingFlow">
+                    <div class="flex items-center gap-1.5 min-w-0">
+                        <svg class="w-3.5 h-3.5 text-ide-muted flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                        <span class="text-[11px] text-ide-muted truncate max-w-[200px]" x-text="newFlow.name || 'Untitled Flow'"></span>
+                    </div>
                 </template>
             </div>
-            <!-- Actions -->
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-1.5">
                 <!-- New / Import / Module dropdown -->
                 <div class="relative" x-data="{ showAddMenu: false }">
                     <button @click="showAddMenu = !showAddMenu"
@@ -2825,93 +2893,96 @@
                         </button>
                     </div>
                 </div>
-
-                <template x-if="editingFlow || isCreatingFlow">
-                    <div class="flex items-center gap-2 pl-2 border-l border-ide-border">
-                        <!-- Continue on Error toggle -->
-                        <label class="flex items-center gap-1.5 text-[11px] text-ide-muted cursor-pointer select-none hover:text-ide-fg transition-colors" title="Continue running steps even if one fails">
-                            <input type="checkbox" x-model="newFlow.continueOnError" class="rounded border-ide-border text-violet-600 focus:ring-violet-500 w-3 h-3">
-                            <span>Continue on error</span>
-                        </label>
-
-                        <!-- Save button -->
-                        <div class="relative flex" x-data="{ showSaveMenu: false }">
-                            <button @click="saveFlow()" :disabled="!newFlow.steps || newFlow.steps.length === 0"
-                                    class="px-3 py-1.5 text-xs font-medium bg-violet-600 text-white rounded-l-md hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5">
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>
-                                Save
-                            </button>
-                            <button @click="showSaveMenu = !showSaveMenu"
-                                    class="px-1 py-1.5 text-xs font-medium bg-violet-600 text-white rounded-r-md hover:bg-violet-700 transition-colors border-l border-violet-500/50">
-                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
-                            </button>
-                            <div x-show="showSaveMenu" @click.outside="showSaveMenu = false"
-                                 x-transition class="absolute right-0 top-full mt-1 w-40 bg-ide-bg border border-ide-border rounded-lg shadow-xl z-50 py-1" x-cloak>
-                                <button @click="saveFlow(); showSaveMenu = false"
-                                        class="w-full px-3 py-1.5 text-left text-xs text-ide-fg hover:bg-ide-line-active flex items-center gap-2">
-                                    <svg class="w-3.5 h-3.5 text-ide-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>
-                                    Save
-                                </button>
-                                <button @click="saveFlowAsNew(); showSaveMenu = false"
-                                        class="w-full px-3 py-1.5 text-left text-xs text-ide-fg hover:bg-ide-line-active flex items-center gap-2">
-                                    <svg class="w-3.5 h-3.5 text-ide-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-                                    Save as New
-                                </button>
-                            </div>
-                        </div>
-
-                        <!-- Run All button -->
-                        <button @click="runFlow()" :disabled="runningFlow || getCurrentFlow().steps.length === 0"
-                                class="px-3 py-1.5 text-xs font-medium bg-ide-fg text-ide-bg rounded-md hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 transition-colors">
-                            <svg x-show="!runningFlow" class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                            <svg x-show="runningFlow" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
-                            <span x-text="runningFlow ? 'Running...' : 'Run All'"></span>
-                        </button>
-
-                        <!-- Results summary (inline in top bar) -->
-                        <template x-if="flowRunResults.filter(r => r).length > 0 && !runningFlow">
-                            <div class="flex items-center gap-2 text-xs text-ide-muted">
-                                <span>
-                                    <span class="text-green-600 font-medium" x-text="flowRunResults.filter(r => r?.success).length"></span>/<span x-text="flowRunResults.filter(r => r).length"></span> passed
-                                </span>
-                                <span x-show="flowTotalDuration > 0" class="font-mono" x-text="flowTotalDuration + 'ms'"></span>
-                                <button @click="flowRunResults = []; flowVariables = {}; flowTotalDuration = 0; flowRunError = null"
-                                        class="text-ide-muted hover:text-ide-fg transition-colors">Clear</button>
-                            </div>
-                        </template>
-
-                        <!-- More menu (export) -->
-                        <div class="relative" x-data="{ showFlowMenu: false }">
-                            <button @click="showFlowMenu = !showFlowMenu"
-                                    class="p-1.5 text-ide-muted hover:text-ide-fg hover:bg-ide-line-active rounded-md transition-colors" title="More options">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"/>
-                                </svg>
-                            </button>
-                            <div x-show="showFlowMenu" @click.outside="showFlowMenu = false" x-transition
-                                 class="absolute right-0 top-full mt-1 w-44 bg-ide-bg border border-ide-border rounded-lg shadow-xl z-50 py-1" x-cloak>
-                                <button @click="exportFlowAsJson(); showFlowMenu = false"
-                                        class="w-full px-3 py-1.5 text-left text-xs text-ide-fg hover:bg-ide-line-active flex items-center gap-2">
-                                    <svg class="w-3.5 h-3.5 text-ide-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                                    Export as JSON
-                                </button>
-                                <button @click="exportFlowAsYaml(); showFlowMenu = false"
-                                        class="w-full px-3 py-1.5 text-left text-xs text-ide-fg hover:bg-ide-line-active flex items-center gap-2">
-                                    <svg class="w-3.5 h-3.5 text-ide-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                                    Export as YAML
-                                </button>
-                                <hr class="my-1 border-ide-border">
-                                <button @click="importFlow(); showFlowMenu = false"
-                                        class="w-full px-3 py-1.5 text-left text-xs text-ide-fg hover:bg-ide-line-active flex items-center gap-2">
-                                    <svg class="w-3.5 h-3.5 text-ide-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
-                                    Import Flow...
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </template>
+                <button @click="showFlowsPanel = false; isCreatingFlow = false; editingFlow = null"
+                        class="p-1.5 text-ide-muted hover:text-ide-fg hover:bg-ide-line-active rounded-md transition-colors" title="Close flows panel">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
             </div>
         </div>
+
+        <!-- Toolbar Row - Visible when editing/creating a flow -->
+        <template x-if="editingFlow || isCreatingFlow">
+            <div class="h-10 border-b border-ide-border bg-ide-surface/50 flex items-center justify-between px-4 flex-shrink-0">
+                <div class="flex items-center gap-3">
+                    <label class="flex items-center gap-1.5 text-[11px] text-ide-muted cursor-pointer select-none hover:text-ide-fg transition-colors" title="Continue running steps even if one fails">
+                        <input type="checkbox" x-model="newFlow.continueOnError" class="rounded border-ide-border text-violet-600 focus:ring-violet-500 w-3.5 h-3.5">
+                        <span>Continue on error</span>
+                    </label>
+                    <template x-if="flowRunResults.filter(r => r).length > 0 && !runningFlow">
+                        <div class="flex items-center gap-2 pl-3 border-l border-ide-border text-xs text-ide-muted">
+                            <span>
+                                <span class="text-green-600 font-medium" x-text="flowRunResults.filter(r => r?.success).length"></span>/<span x-text="flowRunResults.filter(r => r).length"></span> passed
+                            </span>
+                            <span x-show="flowTotalDuration > 0" class="font-mono" x-text="flowTotalDuration + 'ms'"></span>
+                            <button @click="flowRunResults = []; flowVariables = {}; flowTotalDuration = 0; flowRunError = null"
+                                    class="text-ide-muted hover:text-ide-fg transition-colors">Clear</button>
+                        </div>
+                    </template>
+                </div>
+                <div class="flex items-center gap-2">
+                    <!-- More menu (export) -->
+                    <div class="relative" x-data="{ showFlowMenu: false }">
+                        <button @click="showFlowMenu = !showFlowMenu"
+                                class="p-1.5 text-ide-muted hover:text-ide-fg hover:bg-ide-line-active rounded-md transition-colors" title="More options">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"/>
+                            </svg>
+                        </button>
+                        <div x-show="showFlowMenu" @click.outside="showFlowMenu = false" x-transition
+                             class="absolute right-0 top-full mt-1 w-44 bg-ide-bg border border-ide-border rounded-lg shadow-xl z-50 py-1" x-cloak>
+                            <button @click="exportFlowAsJson(); showFlowMenu = false"
+                                    class="w-full px-3 py-1.5 text-left text-xs text-ide-fg hover:bg-ide-line-active flex items-center gap-2">
+                                <svg class="w-3.5 h-3.5 text-ide-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                                Export as JSON
+                            </button>
+                            <button @click="exportFlowAsYaml(); showFlowMenu = false"
+                                    class="w-full px-3 py-1.5 text-left text-xs text-ide-fg hover:bg-ide-line-active flex items-center gap-2">
+                                <svg class="w-3.5 h-3.5 text-ide-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                                Export as YAML
+                            </button>
+                            <hr class="my-1 border-ide-border">
+                            <button @click="importFlow(); showFlowMenu = false"
+                                    class="w-full px-3 py-1.5 text-left text-xs text-ide-fg hover:bg-ide-line-active flex items-center gap-2">
+                                <svg class="w-3.5 h-3.5 text-ide-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                                Import Flow...
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Save button with split dropdown -->
+                    <div class="relative flex" x-data="{ showSaveMenu: false }">
+                        <button @click="saveFlow()" :disabled="!newFlow.steps || newFlow.steps.length === 0"
+                                class="px-3 py-1.5 text-xs font-medium bg-violet-600 text-white rounded-l-md hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>
+                            Save
+                        </button>
+                        <button @click="showSaveMenu = !showSaveMenu"
+                                class="px-1 py-1.5 text-xs font-medium bg-violet-600 text-white rounded-r-md hover:bg-violet-700 transition-colors border-l border-violet-500/50">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                        </button>
+                        <div x-show="showSaveMenu" @click.outside="showSaveMenu = false"
+                             x-transition class="absolute right-0 top-full mt-1 w-40 bg-ide-bg border border-ide-border rounded-lg shadow-xl z-50 py-1" x-cloak>
+                            <button @click="saveFlow(); showSaveMenu = false"
+                                    class="w-full px-3 py-1.5 text-left text-xs text-ide-fg hover:bg-ide-line-active flex items-center gap-2">
+                                <svg class="w-3.5 h-3.5 text-ide-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>
+                                Save
+                            </button>
+                            <button @click="saveFlowAsNew(); showSaveMenu = false"
+                                    class="w-full px-3 py-1.5 text-left text-xs text-ide-fg hover:bg-ide-line-active flex items-center gap-2">
+                                <svg class="w-3.5 h-3.5 text-ide-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                                Save as New
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Run All button -->
+                    <button @click="runFlow()" :disabled="runningFlow || getCurrentFlow().steps.length === 0"
+                            class="px-3 py-1.5 text-xs font-medium bg-ide-fg text-ide-bg rounded-md hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 transition-colors">
+                        <svg x-show="!runningFlow" class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                        <svg x-show="runningFlow" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                        <span x-text="runningFlow ? 'Running...' : 'Run All'"></span>
+                    </button>
+                </div>
+            </div>
+        </template>
 
         <!-- Main Content - 2 Column Layout -->
         <div class="flex-1 flex overflow-hidden">
@@ -3293,12 +3364,12 @@
                     </div>
 
                     <!-- Steps Section -->
-                    <div class="space-y-3">
+                    <div class="space-y-4">
                         <template x-for="(step, index) in getCurrentFlow().steps" :key="step.id || index">
                             <div class="relative group">
                                 <!-- Step Number & Line -->
                                 <div class="absolute left-0 top-0 bottom-0 w-10 flex flex-col items-center">
-                                    <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold z-10"
+                                    <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold z-10"
                                          :class="{
                                              'bg-green-500 text-white': flowRunResults[index]?.success,
                                              'bg-amber-500 text-white': flowRunResults[index]?.httpOk && !flowRunResults[index]?.allAssertionsPassed,
@@ -3311,15 +3382,9 @@
                                 </div>
 
                                 <!-- Step Card -->
-                                <div class="ml-12 border border-ide-border bg-ide-bg overflow-hidden"
-                                     :class="{
-                                         'rounded-lg': !flowRunResults[index],
-                                         'rounded-t-lg': flowRunResults[index],
-                                         'border-[var(--ide-success-text)]/30': flowRunResults[index]?.success,
-                                         'border-amber-400/40': flowRunResults[index]?.httpOk && !flowRunResults[index]?.allAssertionsPassed,
-                                         'border-[var(--ide-error-text)]/30': flowRunResults[index]?.success === false && !(flowRunResults[index]?.httpOk && !flowRunResults[index]?.allAssertionsPassed)
-                                     }">
-                                    <div class="p-4">
+                                <div class="ml-12 border border-ide-border bg-ide-bg rounded-lg overflow-hidden"
+                                     :style="flowRunResults[index] ? 'border-left: 3px solid ' + (flowRunResults[index]?.success ? 'rgb(34 197 94)' : (flowRunResults[index]?.httpOk && !flowRunResults[index]?.allAssertionsPassed ? 'rgb(245 158 11)' : 'rgb(239 68 68)')) : ''">
+                                    <div class="p-5" x-data="{ stepTab: 'config' }">
                                         <div class="flex items-start justify-between gap-3">
                                             <div class="flex-1 min-w-0">
                                                 <div class="flex items-center gap-2 mb-2">
@@ -3328,7 +3393,7 @@
                                                 </div>
                                                 <div class="flex items-center gap-2">
                                                     <input type="text" x-model="step.name" placeholder="Add step name..."
-                                                           class="flex-1 text-sm bg-transparent border-0 p-0 text-ide-fg placeholder-gray-400 focus:ring-0">
+                                                           class="flex-1 text-base bg-transparent border-0 p-0 text-ide-fg placeholder-gray-400 focus:ring-0">
                                                     <!-- Last run status badge -->
                                                     <template x-if="flowRunResults[index]">
                                                         <span class="shrink-0 px-1.5 py-0.5 text-[10px] font-bold rounded font-mono"
@@ -3343,7 +3408,13 @@
                                                 </div>
                                             </div>
                                             <div class="flex items-center gap-0.5">
-                                                <!-- Play button (always visible) -->
+                                                <button @click="moveStepUp(index)" :disabled="index === 0" class="p-1.5 text-ide-muted hover:text-ide-fg disabled:opacity-30 rounded" title="Move up">
+                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/></svg>
+                                                </button>
+                                                <button @click="moveStepDown(index)" :disabled="index === getCurrentFlow().steps.length - 1" class="p-1.5 text-ide-muted hover:text-ide-fg disabled:opacity-30 rounded" title="Move down">
+                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                                                </button>
+                                                <!-- Play button -->
                                                 <button @click.stop="runSingleStep(index)" :disabled="runningFlow || runningSingleStep !== -1"
                                                         class="p-1.5 rounded transition-colors"
                                                         :class="runningSingleStep === index ? 'text-green-500 animate-pulse' : 'text-green-500 hover:bg-green-500/10'"
@@ -3351,34 +3422,74 @@
                                                     <svg x-show="runningSingleStep !== index" class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                                                     <svg x-show="runningSingleStep === index" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
                                                 </button>
-                                            </div>
-                                            <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button @click="flowDocEndpoint = getFullEndpointForStep(step); if (flowDocEndpoint) { showFlowDocDialog = true; } else { showToast('Endpoint not found in spec', 'error'); }" class="p-1.5 text-ide-muted hover:text-ide-primary hover:bg-ide-primary/10 rounded" title="View documentation">
-                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
-                                                </button>
-                                                <button @click="prefillStepWithExamples(step)" class="p-1.5 text-[var(--ide-warning-text)] hover:opacity-80 hover:bg-[var(--ide-warning-bg)] rounded" title="Fill with example values">
-                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-                                                </button>
-                                                <button @click="showImportModal(index)" class="p-1.5 text-ide-primary hover:opacity-80 hover:bg-ide-primary/10 rounded" title="Import from saved request">
-                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
-                                                </button>
-                                                <button @click="saveStepAsRequest(step, index)" class="p-1.5 text-green-500 hover:opacity-80 hover:bg-green-500/10 rounded" title="Save as standalone request">
-                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>
-                                                </button>
-                                                <button @click="moveStepUp(index)" :disabled="index === 0" class="p-1.5 text-ide-muted hover:text-ide-fg disabled:opacity-30">
-                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/></svg>
-                                                </button>
-                                                <button @click="moveStepDown(index)" :disabled="index === getCurrentFlow().steps.length - 1" class="p-1.5 text-ide-muted hover:text-ide-fg disabled:opacity-30">
-                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
-                                                </button>
-                                                <button @click="removeStepFromFlow(index)" class="p-1.5 text-gray-400 hover:text-red-500">
-                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                                                </button>
+                                                <!-- More menu dropdown -->
+                                                <div class="relative" x-data="{ stepMenu: false }">
+                                                    <button @click="stepMenu = !stepMenu" class="p-1.5 text-ide-muted hover:text-ide-fg hover:bg-ide-surface rounded transition-colors" title="More actions">
+                                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01"/></svg>
+                                                    </button>
+                                                    <div x-show="stepMenu" @click.away="stepMenu = false" x-transition
+                                                         class="absolute right-0 top-full mt-1 w-48 bg-ide-bg border border-ide-border rounded-lg shadow-xl z-30 py-1">
+                                                        <button @click="flowDocEndpoint = getFullEndpointForStep(step); if (flowDocEndpoint) { showFlowDocDialog = true; } else { showToast('Endpoint not found in spec', 'error'); }; stepMenu = false"
+                                                                class="w-full px-3 py-1.5 text-sm text-left text-ide-fg hover:bg-ide-surface flex items-center gap-2">
+                                                            <svg class="w-3.5 h-3.5 text-ide-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
+                                                            View Docs
+                                                        </button>
+                                                        <button @click="prefillStepWithExamples(step); stepMenu = false"
+                                                                class="w-full px-3 py-1.5 text-sm text-left text-ide-fg hover:bg-ide-surface flex items-center gap-2">
+                                                            <svg class="w-3.5 h-3.5 text-[var(--ide-warning-text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                                                            Fill Examples
+                                                        </button>
+                                                        <button @click="showImportModal(index); stepMenu = false"
+                                                                class="w-full px-3 py-1.5 text-sm text-left text-ide-fg hover:bg-ide-surface flex items-center gap-2">
+                                                            <svg class="w-3.5 h-3.5 text-ide-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                                                            Import Request
+                                                        </button>
+                                                        <button @click="saveStepAsRequest(step, index); stepMenu = false"
+                                                                class="w-full px-3 py-1.5 text-sm text-left text-ide-fg hover:bg-ide-surface flex items-center gap-2">
+                                                            <svg class="w-3.5 h-3.5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>
+                                                            Save as Request
+                                                        </button>
+                                                        <div class="border-t border-ide-border my-1"></div>
+                                                        <button @click="removeStepFromFlow(index); stepMenu = false"
+                                                                class="w-full px-3 py-1.5 text-sm text-left text-red-500 hover:bg-red-500/10 flex items-center gap-2">
+                                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                                                            Delete Step
+                                                        </button>
+                                                    </div>
+                                                </div>
                                             </div>
                                         </div>
 
+                                        <!-- Tab Bar -->
+                                        <div class="mt-3 flex border-b border-ide-border">
+                                            <button @click="stepTab = 'config'" class="px-3 py-1.5 text-sm transition-colors -mb-px"
+                                                    :class="stepTab === 'config' ? 'text-violet-500 border-b-2 border-violet-500 font-medium' : 'text-ide-muted hover:text-ide-fg'">
+                                                Config
+                                            </button>
+                                            <button @click="stepTab = 'test'" class="px-3 py-1.5 text-sm transition-colors -mb-px"
+                                                    :class="stepTab === 'test' ? 'text-violet-500 border-b-2 border-violet-500 font-medium' : 'text-ide-muted hover:text-ide-fg'">
+                                                Test
+                                                <span x-show="(step.assertions || []).length > 0 || step.expectedResult"
+                                                      class="ml-1 px-1 py-0.5 text-xs bg-ide-border rounded text-ide-muted"
+                                                      x-text="(step.assertions || []).length + (step.expectedResult ? 1 : 0)"></span>
+                                            </button>
+                                            <button @click="stepTab = 'variables'" class="px-3 py-1.5 text-sm transition-colors -mb-px"
+                                                    :class="stepTab === 'variables' ? 'text-violet-500 border-b-2 border-violet-500 font-medium' : 'text-ide-muted hover:text-ide-fg'">
+                                                Variables
+                                                <span x-show="Object.keys(step.extractVariables || {}).length > 0 || (step.computedVariables || []).length > 0"
+                                                      class="ml-1 px-1 py-0.5 text-xs bg-ide-border rounded text-ide-muted"
+                                                      x-text="Object.keys(step.extractVariables || {}).length + (step.computedVariables || []).length"></span>
+                                            </button>
+                                        </div>
+
+                                        <!-- Tab Content -->
+                                        <div class="mt-4">
+
+                                        <!-- ==================== CONFIG TAB ==================== -->
+                                        <div x-show="stepTab === 'config'" class="space-y-4">
+
                                         <!-- Expected Status -->
-                                        <div class="flex items-center gap-2 mt-3 pt-3 border-t border-ide-border"
+                                        <div class="flex items-center gap-2"
                                              x-data="{ get docCodes() { return getStatusCodesForEndpoint(step.endpoint) } }">
                                             <label class="text-xs text-ide-muted whitespace-nowrap">Expected Status</label>
                                             <select :value="step.expectedStatus ?? ''"
@@ -3397,31 +3508,14 @@
                                             </template>
                                         </div>
 
-                                        <!-- Expected Result Section -->
-                                        <div class="mt-3 pt-3 border-t border-ide-border" x-data="{ showExpected: !!(step.expectedResult) }">
-                                            <button @click="showExpected = !showExpected" class="text-xs text-gray-500 hover:text-ide-fg flex items-center gap-1.5 mb-2">
-                                                <svg class="w-3 h-3 transition-transform" :class="{ 'rotate-90': showExpected }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-                                                </svg>
-                                                <span>Expected Result</span>
-                                                <span x-show="step.expectedResult" class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-                                            </button>
-                                            <div x-show="showExpected" x-collapse>
-                                                <textarea x-model="step.expectedResult"
-                                                          placeholder="Describe the expected response, paste a JSON sample, etc."
-                                                          rows="3"
-                                                          class="w-full px-3 py-2 text-xs font-mono bg-ide-surface border border-ide-border rounded-lg text-ide-fg placeholder-gray-400 focus:ring-1 focus:ring-ide-primary/50 focus:border-ide-primary/50 resize-y min-h-[60px]"></textarea>
-                                            </div>
-                                        </div>
-
                                         <!-- Path Parameters Section -->
-                                        <div x-show="Object.keys(step.pathParams || {}).length > 0" class="mt-3 pt-3 border-t border-ide-border" x-data="{ showPathParams: true }">
-                                            <button @click="showPathParams = !showPathParams" class="text-xs text-gray-500 hover:text-ide-fg flex items-center gap-1.5 mb-2">
-                                                <svg class="w-3 h-3 transition-transform" :class="{ 'rotate-90': showPathParams }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <div x-show="Object.keys(step.pathParams || {}).length > 0" class="mt-4 pt-4 border-t border-ide-border" x-data="{ showPathParams: true }">
+                                            <button @click="showPathParams = !showPathParams" class="text-sm text-gray-500 hover:text-ide-fg flex items-center gap-1.5 mb-2">
+                                                <svg class="w-3.5 h-3.5 transition-transform" :class="{ 'rotate-90': showPathParams }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                                                 </svg>
                                                 <span>Path Parameters</span>
-                                                <span class="px-1 py-0.5 text-[10px] bg-[var(--ide-warning-bg)] text-[var(--ide-warning-text)] rounded" x-text="Object.keys(step.pathParams || {}).length"></span>
+                                                <span class="px-1 py-0.5 text-xs bg-[var(--ide-warning-bg)] text-[var(--ide-warning-text)] rounded" x-text="Object.keys(step.pathParams || {}).length"></span>
                                             </button>
                                             <div x-show="showPathParams" x-collapse class="space-y-2">
                                                 <template x-for="(value, key) in step.pathParams || {}" :key="key">
@@ -3439,7 +3533,7 @@
                                                         </label>
                                                         <input type="text" x-model="step.pathParams[key]"
                                                                @input="handleVariableAutocomplete($event, step, 'pathParams', key)"
-                                                               class="flex-1 px-2 py-1 text-xs bg-ide-surface border border-ide-border rounded font-mono"
+                                                               class="flex-1 px-2 py-1.5 text-sm bg-ide-surface border border-ide-border rounded font-mono"
                                                                :class="step._autoFilledFields?.[key]
                                                                    ? (step._autoFilledFields[key].type === 'discovered' ? 'text-amber-600 border-amber-500/40 bg-amber-500/5' : 'text-green-600 border-green-500/40 bg-green-500/5')
                                                                    : (String(step.pathParams[key] || '').match(/\x7b\x7b/) ? 'text-violet-400 border-violet-500/40 bg-violet-500/5' : 'text-ide-fg')"
@@ -3455,24 +3549,24 @@
                                         </div>
 
                                         <!-- Headers Section -->
-                                        <div class="mt-3 pt-3 border-t border-ide-border" x-data="{ showHeaders: false, newKey: '', newValue: '' }">
-                                            <button @click="showHeaders = !showHeaders" class="text-xs text-gray-500 hover:text-ide-fg flex items-center gap-1.5 mb-2">
-                                                <svg class="w-3 h-3 transition-transform" :class="{ 'rotate-90': showHeaders }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <div class="mt-4 pt-4 border-t border-ide-border" x-data="{ showHeaders: false, newKey: '', newValue: '' }">
+                                            <button @click="showHeaders = !showHeaders" class="text-sm text-gray-500 hover:text-ide-fg flex items-center gap-1.5 mb-2">
+                                                <svg class="w-3.5 h-3.5 transition-transform" :class="{ 'rotate-90': showHeaders }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                                                 </svg>
                                                 <span>Headers</span>
-                                                <span class="px-1 py-0.5 text-[10px] bg-ide-border text-ide-muted rounded" x-text="Object.keys(step.headers || {}).length"></span>
-                                                <span class="text-[10px] text-gray-400">(overrides defaults)</span>
+                                                <span class="px-1 py-0.5 text-xs bg-ide-border text-ide-muted rounded" x-text="Object.keys(step.headers || {}).length"></span>
+                                                <span class="text-xs text-gray-400">(overrides defaults)</span>
                                             </button>
                                             <div x-show="showHeaders" x-collapse class="space-y-2">
                                                 <!-- Existing headers -->
                                                 <template x-for="(value, key) in step.headers || {}" :key="key">
                                                     <div class="flex items-center gap-2">
                                                         <input type="text" :value="key" readonly
-                                                               class="w-1/3 px-2 py-1 text-xs font-medium bg-ide-border border border-ide-border rounded text-ide-fg">
+                                                               class="w-1/3 px-2 py-1.5 text-sm font-medium bg-ide-border border border-ide-border rounded text-ide-fg">
                                                         <input type="text" x-model="step.headers[key]"
                                                                @input="handleVariableAutocomplete($event, step, 'headers', key)"
-                                                               class="flex-1 px-2 py-1 text-xs bg-ide-surface border border-ide-border rounded font-mono"
+                                                               class="flex-1 px-2 py-1.5 text-sm bg-ide-surface border border-ide-border rounded font-mono"
                                                                :class="String(step.headers[key] || '').match(/\x7b\x7b/) ? 'text-violet-400 border-violet-500/40 bg-violet-500/5' : 'text-ide-fg'"
                                                         <button @click="openVariablePicker(step, 'headers', key, $event)"
                                                                 class="px-1.5 py-1 text-xs text-[var(--ide-info-text)] hover:opacity-80 hover:bg-[var(--ide-info-bg)] rounded">
@@ -3480,30 +3574,30 @@
                                                         </button>
                                                         <button @click="removeStepHeader(step, key)"
                                                                 class="p-1 text-gray-400 hover:text-red-500">
-                                                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                                                         </button>
                                                     </div>
                                                 </template>
                                                 <!-- Add new header -->
                                                 <div class="flex items-center gap-2">
                                                     <input type="text" x-model="newKey" placeholder="Header name"
-                                                           class="w-1/3 px-2 py-1 text-xs bg-ide-surface border border-ide-border rounded text-ide-fg placeholder-gray-400">
+                                                           class="w-1/3 px-2 py-1.5 text-sm bg-ide-surface border border-ide-border rounded text-ide-fg placeholder-gray-400">
                                                     <input type="text" x-model="newValue" placeholder="Value"
-                                                           class="flex-1 px-2 py-1 text-xs bg-ide-surface border border-ide-border rounded text-ide-fg placeholder-gray-400 font-mono">
+                                                           class="flex-1 px-2 py-1.5 text-sm bg-ide-surface border border-ide-border rounded text-ide-fg placeholder-gray-400 font-mono">
                                                     <button @click="if(newKey) { addStepHeader(step, newKey, newValue); newKey = ''; newValue = ''; }"
-                                                            class="px-2 py-1 text-xs bg-ide-fg text-ide-bg rounded hover:opacity-90">Add</button>
+                                                            class="px-2 py-1.5 text-sm bg-ide-fg text-ide-bg rounded hover:opacity-90">Add</button>
                                                 </div>
                                             </div>
                                         </div>
 
                                         <!-- Query Parameters Section -->
-                                        <div class="mt-3 pt-3 border-t border-ide-border" x-data="{ showParams: false, newKey: '', newValue: '' }">
-                                            <button @click="showParams = !showParams" class="text-xs text-gray-500 hover:text-ide-fg flex items-center gap-1.5 mb-2">
-                                                <svg class="w-3 h-3 transition-transform" :class="{ 'rotate-90': showParams }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <div class="mt-4 pt-4 border-t border-ide-border" x-data="{ showParams: false, newKey: '', newValue: '' }">
+                                            <button @click="showParams = !showParams" class="text-sm text-gray-500 hover:text-ide-fg flex items-center gap-1.5 mb-2">
+                                                <svg class="w-3.5 h-3.5 transition-transform" :class="{ 'rotate-90': showParams }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                                                 </svg>
                                                 <span>Query Parameters</span>
-                                                <span class="px-1 py-0.5 text-[10px] bg-ide-border text-ide-muted rounded" x-text="Object.keys(step.params || {}).length"></span>
+                                                <span class="px-1 py-0.5 text-xs bg-ide-border text-ide-muted rounded" x-text="Object.keys(step.params || {}).length"></span>
                                             </button>
                                             <div x-show="showParams" x-collapse class="space-y-2">
                                                 <!-- Existing params -->
@@ -3523,7 +3617,7 @@
                                                         </div>
                                                         <input type="text" x-model="step.params[key]"
                                                                @input="handleVariableAutocomplete($event, step, 'params', key)"
-                                                               class="flex-1 px-2 py-1 text-xs bg-ide-surface border border-ide-border rounded font-mono"
+                                                               class="flex-1 px-2 py-1.5 text-sm bg-ide-surface border border-ide-border rounded font-mono"
                                                                :class="step._autoFilledFields?.[key]
                                                                    ? (step._autoFilledFields[key].type === 'discovered' ? 'text-amber-600 border-amber-500/40 bg-amber-500/5' : 'text-green-600 border-green-500/40 bg-green-500/5')
                                                                    : (String(step.params[key] || '').match(/\x7b\x7b/) ? 'text-violet-400 border-violet-500/40 bg-violet-500/5' : 'text-ide-fg')">
@@ -3533,18 +3627,18 @@
                                                         </button>
                                                         <button @click="removeStepParam(step, key)"
                                                                 class="p-1 text-gray-400 hover:text-red-500">
-                                                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                                                         </button>
                                                     </div>
                                                 </template>
                                                 <!-- Suggested params from endpoint schema -->
                                                 <div x-show="getQueryParamsForEndpoint(step.endpoint).length > 0" class="pt-1">
-                                                    <div class="text-[10px] text-gray-400 mb-1">Quick add:</div>
+                                                    <div class="text-xs text-gray-400 mb-1">Quick add:</div>
                                                     <div class="flex flex-wrap gap-1">
                                                         <template x-for="param in getQueryParamsForEndpoint(step.endpoint).slice(0, 6)" :key="param.name">
                                                             <button @click="if(!step.params?.[param.name]) { step.params = step.params || {}; step.params[param.name] = ''; }"
                                                                     x-show="!step.params?.[param.name]"
-                                                                    class="px-1.5 py-0.5 text-[10px] bg-ide-border text-ide-muted rounded hover:bg-ide-line-active"
+                                                                    class="px-1.5 py-0.5 text-xs bg-ide-border text-ide-muted rounded hover:bg-ide-line-active"
                                                                     x-text="param.name">
                                                             </button>
                                                         </template>
@@ -3553,25 +3647,25 @@
                                                 <!-- Add new param -->
                                                 <div class="flex items-center gap-2">
                                                     <input type="text" x-model="newKey" placeholder="Param name"
-                                                           class="w-1/3 px-2 py-1 text-xs bg-ide-surface border border-ide-border rounded text-ide-fg placeholder-gray-400">
+                                                           class="w-1/3 px-2 py-1.5 text-sm bg-ide-surface border border-ide-border rounded text-ide-fg placeholder-gray-400">
                                                     <input type="text" x-model="newValue" placeholder="Value"
-                                                           class="flex-1 px-2 py-1 text-xs bg-ide-surface border border-ide-border rounded text-ide-fg placeholder-gray-400 font-mono">
+                                                           class="flex-1 px-2 py-1.5 text-sm bg-ide-surface border border-ide-border rounded text-ide-fg placeholder-gray-400 font-mono">
                                                     <button @click="if(newKey) { addStepParam(step, newKey, newValue); newKey = ''; newValue = ''; }"
-                                                            class="px-2 py-1 text-xs bg-ide-fg text-ide-bg rounded hover:opacity-90">Add</button>
+                                                            class="px-2 py-1.5 text-sm bg-ide-fg text-ide-bg rounded hover:opacity-90">Add</button>
                                                 </div>
                                             </div>
                                         </div>
 
                                         <!-- Request Body Section (for POST/PUT/PATCH) -->
                                         <div x-show="methodRequiresBody(step.endpoint?.method)"
-                                             class="mt-3 pt-3 border-t border-ide-border"
+                                             class="mt-4 pt-4 border-t border-ide-border"
                                              x-data="{ showBody: false, newKey: '', newValue: '' }">
-                                            <button @click="showBody = !showBody" class="text-xs text-gray-500 hover:text-ide-fg flex items-center gap-1.5 mb-2">
-                                                <svg class="w-3 h-3 transition-transform" :class="{ 'rotate-90': showBody }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <button @click="showBody = !showBody" class="text-sm text-gray-500 hover:text-ide-fg flex items-center gap-1.5 mb-2">
+                                                <svg class="w-3.5 h-3.5 transition-transform" :class="{ 'rotate-90': showBody }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                                                 </svg>
                                                 <span>Request Body</span>
-                                                <span class="px-1 py-0.5 text-[10px] bg-[var(--ide-info-bg)] text-[var(--ide-info-text)] rounded" x-text="Object.keys(step.body || {}).length + ' fields'"></span>
+                                                <span class="px-1 py-0.5 text-xs bg-[var(--ide-info-bg)] text-[var(--ide-info-text)] rounded" x-text="Object.keys(step.body || {}).length + ' fields'"></span>
                                             </button>
                                             <div x-show="showBody" x-collapse class="space-y-2">
                                                 <!-- Mode Toggle -->
@@ -3732,7 +3826,7 @@
                                                               rows="6"
                                                               class="w-full px-2 py-1.5 text-xs font-mono bg-ide-bg text-green-400 border border-gray-700 rounded resize-y"
                                                               placeholder='{"key": "value"}'></textarea>
-                                                    <p class="text-[10px] text-gray-400">Tip: Use @{{step1.varName}} for variables</p>
+                                                    <p class="text-xs text-gray-400">Tip: Use @{{step1.varName}} for variables</p>
                                                 </div>
 
                                                 <!-- Form-Data Mode (multipart/form-data) -->
@@ -3772,7 +3866,7 @@
                                                         <button @click="if(fdKey) { if(!step.formDataEntries) step.formDataEntries = []; step.formDataEntries.push({key: fdKey, value: fdValue, type: fdType}); fdKey = ''; fdValue = ''; fdType = 'text'; }"
                                                                 class="px-2 py-1 text-xs bg-ide-fg text-ide-bg rounded hover:opacity-90">Add</button>
                                                     </div>
-                                                    <p class="text-[10px] text-gray-400">Sent as multipart/form-data. Supports file uploads.</p>
+                                                    <p class="text-xs text-gray-400">Sent as multipart/form-data. Supports file uploads.</p>
                                                 </div>
 
                                                 <!-- URL-Encoded Mode (application/x-www-form-urlencoded) -->
@@ -3800,7 +3894,7 @@
                                                         <button @click="if(ueKey) { if(!step.urlencodedBody) step.urlencodedBody = {}; step.urlencodedBody[ueKey] = ueValue; ueKey = ''; ueValue = ''; }"
                                                                 class="px-2 py-1 text-xs bg-ide-fg text-ide-bg rounded hover:opacity-90">Add</button>
                                                     </div>
-                                                    <p class="text-[10px] text-gray-400">Sent as application/x-www-form-urlencoded</p>
+                                                    <p class="text-xs text-gray-400">Sent as application/x-www-form-urlencoded</p>
                                                 </div>
 
                                                 <!-- Raw Mode -->
@@ -3820,82 +3914,37 @@
                                                               rows="6"
                                                               class="w-full px-2 py-1.5 text-xs font-mono bg-ide-bg text-green-400 border border-gray-700 rounded resize-y"
                                                               placeholder="Enter raw body content..."></textarea>
-                                                    <p class="text-[10px] text-gray-400">Tip: Use @{{step1.varName}} for variables</p>
+                                                    <p class="text-xs text-gray-400">Tip: Use @{{step1.varName}} for variables</p>
                                                 </div>
                                             </div>
                                         </div>
 
-                                        <!-- Variables Section -->
-                                        <div class="mt-3 pt-3 border-t border-ide-border" x-data="{ expanded: true, vName: '', vPath: '' }">
-                                            <button @click="expanded = !expanded" class="text-xs text-gray-500 hover:text-ide-fg flex items-center gap-1.5 mb-2">
-                                                <svg class="w-3 h-3 transition-transform" :class="{ 'rotate-90': expanded }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        </div><!-- END CONFIG TAB -->
+
+                                        <!-- ==================== TEST TAB ==================== -->
+                                        <div x-show="stepTab === 'test'" class="space-y-4">
+
+                                        <!-- Expected Result Section -->
+                                        <div x-data="{ showExpected: !!(step.expectedResult) }">
+                                            <button @click="showExpected = !showExpected" class="text-sm text-gray-500 hover:text-ide-fg flex items-center gap-1.5 mb-2">
+                                                <svg class="w-3.5 h-3.5 transition-transform" :class="{ 'rotate-90': showExpected }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                                                 </svg>
-                                                <span x-text="'Extract ' + Object.keys(step.extractVariables || {}).length + ' variables'"></span>
+                                                <span>Expected Result</span>
+                                                <span x-show="step.expectedResult" class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
                                             </button>
-
-                                            <div x-show="expanded" x-collapse class="space-y-2">
-                                                <!-- Response fields picker -->
-                                                <div x-data="{
-                                                        showFields: false,
-                                                        fieldSearch: '',
-                                                        get responseFields() { return getResponseFieldsForEndpoint(step.endpoint, step.expectedStatus) },
-                                                        get filteredResponseFields() {
-                                                            if (!this.fieldSearch) return this.responseFields;
-                                                            const q = this.fieldSearch.toLowerCase();
-                                                            return this.responseFields.filter(f => f.name.toLowerCase().includes(q) || f.path.toLowerCase().includes(q));
-                                                        }
-                                                     }"
-                                                     x-show="responseFields.length > 0" class="mt-2">
-                                                    <button @click="showFields = !showFields" class="flex items-center gap-1.5 text-xs text-ide-muted hover:text-ide-fg transition-colors w-full">
-                                                        <svg class="w-3 h-3 transition-transform" :class="{ 'rotate-90': showFields }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-                                                        </svg>
-                                                        <span>Pick from response</span>
-                                                        <template x-if="step.expectedStatus">
-                                                            <span class="text-[10px] font-mono px-1 py-0.5 rounded"
-                                                                  :class="step.expectedStatus >= 400 ? 'bg-amber-500/10 text-amber-600' : 'bg-green-500/10 text-green-600'"
-                                                                  x-text="step.expectedStatus"></span>
-                                                        </template>
-                                                        <span class="ml-auto text-[10px] text-ide-muted" x-text="fieldSearch ? (filteredResponseFields.length + '/' + responseFields.length + ' fields') : (responseFields.length + ' fields')"></span>
-                                                    </button>
-                                                    <div x-show="showFields" x-collapse class="mt-1.5">
-                                                        <template x-if="responseFields.length > 10">
-                                                            <input type="text" x-model="fieldSearch" placeholder="Search fields..."
-                                                                   class="w-full px-2 py-1 mb-1.5 text-xs bg-ide-surface border border-ide-border rounded text-ide-fg placeholder-gray-400 font-mono focus:ring-1 focus:ring-ide-primary">
-                                                        </template>
-                                                        <div class="flex flex-wrap gap-1 max-h-48 overflow-y-auto">
-                                                            <template x-for="field in filteredResponseFields" :key="field.path">
-                                                                <button @click="step.extractVariables = step.extractVariables || {}; if (step.extractVariables[field.name]) { delete step.extractVariables[field.name]; step.extractVariables = {...step.extractVariables}; } else { step.extractVariables[field.name] = field.path; } reExtractVariablesForStep(newFlow.steps.indexOf(step));"
-                                                                        class="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-mono rounded-md border transition-all"
-                                                                        :class="step.extractVariables?.[field.name]
-                                                                            ? 'bg-green-500/10 border-green-500/30 text-green-700 dark:text-green-400'
-                                                                            : 'bg-ide-surface border-ide-border text-ide-muted hover:text-ide-fg hover:border-ide-fg/30'">
-                                                                    <span x-text="field.name"></span>
-                                                                    <span class="text-[9px] opacity-50" x-text="field.type"></span>
-                                                                </button>
-                                                            </template>
-                                                        </div>
-                                                    </div>
-                                                </div>
-
-                                                <!-- Add custom variable -->
-                                                <div class="flex items-center gap-2 mt-2">
-                                                    <input type="text" x-model="vName" placeholder="var name"
-                                                           class="w-24 px-2 py-1 text-xs border border-ide-border rounded bg-ide-surface text-ide-fg placeholder-gray-400">
-                                                    <span class="text-gray-400">=</span>
-                                                    <input type="text" x-model="vPath" placeholder="data.id"
-                                                           class="flex-1 px-2 py-1 text-xs border border-ide-border rounded bg-ide-surface text-ide-fg placeholder-gray-400 font-mono">
-                                                    <button @click="if(vName && vPath) { step.extractVariables = step.extractVariables || {}; step.extractVariables[vName] = vPath; reExtractVariablesForStep(newFlow.steps.indexOf(step)); vName = ''; vPath = ''; }"
-                                                            class="px-2 py-1 text-xs bg-ide-fg text-ide-bg rounded hover:opacity-90 transition-colors">Add</button>
-                                                </div>
+                                            <div x-show="showExpected" x-collapse>
+                                                <textarea x-model="step.expectedResult"
+                                                          placeholder="Describe the expected response, paste a JSON sample, etc."
+                                                          rows="3"
+                                                          class="w-full px-3 py-2 text-sm font-mono bg-ide-surface border border-ide-border rounded-lg text-ide-fg placeholder-gray-400 focus:ring-1 focus:ring-ide-primary/50 focus:border-ide-primary/50 resize-y min-h-[60px]"></textarea>
                                             </div>
                                         </div>
 
                                         <!-- Assertions Section -->
-                                        <div class="mt-3 pt-3 border-t border-ide-border" x-data="{ expanded: (step.assertions || []).length > 0 }">
-                                            <button @click="expanded = !expanded" class="text-xs text-gray-500 hover:text-ide-fg flex items-center gap-1.5 mb-2">
-                                                <svg class="w-3 h-3 transition-transform" :class="{ 'rotate-90': expanded }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <div class="mt-4 pt-4 border-t border-ide-border" x-data="{ expanded: (step.assertions || []).length > 0 }">
+                                            <button @click="expanded = !expanded" class="text-sm text-gray-500 hover:text-ide-fg flex items-center gap-1.5 mb-2">
+                                                <svg class="w-3.5 h-3.5 transition-transform" :class="{ 'rotate-90': expanded }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                                                 </svg>
                                                 <span x-text="'Assertions (' + (step.assertions || []).length + ')'"></span>
@@ -3905,16 +3954,16 @@
                                                  x-data="{ get assertionFields() { return getResponseFieldsForEndpoint(step.endpoint, step.expectedStatus) } }">
                                                 <!-- Existing assertions -->
                                                 <template x-for="(assertion, aIdx) in step.assertions || []" :key="aIdx">
-                                                    <div class="flex items-center gap-1.5 text-xs flex-wrap">
+                                                    <div class="flex items-center gap-1.5 text-sm flex-wrap">
                                                         <select x-model="assertion.type" @change="if(assertion.type === 'status') { assertion.operator = 'equals'; assertion.expected = String(step.expectedStatus || 200); assertion.path = ''; } else if(assertion.type === 'responseTime') { assertion.operator = 'lessThan'; assertion.expected = '2000'; assertion.path = ''; } else { assertion.operator = 'exists'; assertion.path = ''; assertion.expected = ''; }"
-                                                                class="px-1.5 py-1 bg-ide-surface border border-ide-border rounded text-ide-fg w-20">
+                                                                class="px-1.5 py-1.5 bg-ide-surface border border-ide-border rounded text-ide-fg w-20">
                                                             <option value="status">Status</option>
                                                             <option value="field">Field</option>
                                                             <option value="responseTime">Time</option>
                                                         </select>
                                                         <template x-if="assertion.type === 'field'">
                                                             <select x-model="assertion.path"
-                                                                    class="px-1.5 py-1 bg-ide-surface border border-ide-border rounded text-ide-fg font-mono max-w-[140px]">
+                                                                    class="px-1.5 py-1.5 bg-ide-surface border border-ide-border rounded text-ide-fg font-mono max-w-[140px]">
                                                                 <option value="" disabled>Select field...</option>
                                                                 <template x-for="f in assertionFields" :key="'af-' + f.path">
                                                                     <option :value="f.path" x-text="f.path + ' (' + f.type + ')'"></option>
@@ -3922,7 +3971,7 @@
                                                                 <option value="__custom__" x-show="assertion.path && !assertionFields.some(f => f.path === assertion.path)">Custom...</option>
                                                             </select>
                                                         </template>
-                                                        <select x-model="assertion.operator" class="px-1.5 py-1 bg-ide-surface border border-ide-border rounded text-ide-fg">
+                                                        <select x-model="assertion.operator" class="px-1.5 py-1.5 bg-ide-surface border border-ide-border rounded text-ide-fg">
                                                             <option value="equals">=</option>
                                                             <option value="notEquals">!=</option>
                                                             <option value="exists">exists</option>
@@ -3934,130 +3983,286 @@
                                                         </select>
                                                         <template x-if="assertion.operator !== 'exists' && assertion.operator !== 'notExists'">
                                                             <input type="text" x-model="assertion.expected" placeholder="expected"
-                                                                   class="px-1.5 py-1 bg-ide-surface border border-ide-border rounded text-ide-fg w-20 font-mono">
+                                                                   class="px-1.5 py-1.5 bg-ide-surface border border-ide-border rounded text-ide-fg w-20 font-mono">
                                                         </template>
                                                         <button @click="step.assertions.splice(aIdx, 1)" class="p-1 text-gray-400 hover:text-red-500">
-                                                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                                                         </button>
                                                     </div>
                                                 </template>
 
                                                 <!-- Add assertion -->
                                                 <button @click="step.assertions = step.assertions || []; step.assertions.push({ type: 'status', operator: 'equals', expected: String(step.expectedStatus || 200), path: '' })"
-                                                        class="text-xs text-ide-primary hover:underline mt-1">+ Add assertion</button>
+                                                        class="text-sm text-ide-primary hover:underline mt-1">+ Add assertion</button>
                                             </div>
                                         </div>
-                                    </div>
-                                </div>
 
-                                <!-- Inline Result Block (Jupyter-style) -->
-                                <template x-if="flowRunResults[index]">
-                                    <div class="ml-12 border border-t-0 rounded-b-lg overflow-hidden" x-data="{ showInlineResponse: false }"
-                                         :class="{
-                                             'border-green-400/40 bg-green-50/50 dark:bg-green-900/10': flowRunResults[index]?.success,
-                                             'border-amber-400/40 bg-amber-50/50 dark:bg-amber-900/10': flowRunResults[index]?.httpOk && !flowRunResults[index]?.allAssertionsPassed,
-                                             'border-red-400/40 bg-red-50/50 dark:bg-red-900/10': !flowRunResults[index]?.httpOk
-                                         }">
-                                        <!-- Result Header -->
-                                        <div class="px-3 py-2 flex items-center justify-between gap-2">
-                                            <div class="flex items-center gap-2 min-w-0">
-                                                <!-- Status badge -->
-                                                <span class="px-1.5 py-0.5 text-[10px] font-bold rounded font-mono"
-                                                      :class="{
-                                                          'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400': flowRunResults[index]?.success,
-                                                          'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400': flowRunResults[index]?.httpOk && !flowRunResults[index]?.allAssertionsPassed,
-                                                          'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400': !flowRunResults[index]?.httpOk
-                                                      }"
-                                                      x-text="flowRunResults[index]?.status || 'ERR'"></span>
-                                                <!-- Duration -->
-                                                <span x-show="flowRunResults[index]?.duration" class="text-[10px] font-mono text-ide-muted" x-text="flowRunResults[index]?.duration + 'ms'"></span>
-                                                <!-- Pass/Fail -->
-                                                <span class="text-[10px] font-bold"
-                                                      :class="flowRunResults[index]?.success ? 'text-green-600' : 'text-red-600'"
-                                                      x-text="flowRunResults[index]?.success ? 'PASS' : 'FAIL'"></span>
-                                            </div>
-                                            <div class="flex items-center gap-1">
-                                                <!-- Expand in dialog -->
-                                                <button @click="openFlowResponseDialog(index)"
-                                                        class="p-1 text-ide-muted hover:text-ide-primary rounded transition-colors" title="Expand response">
-                                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
-                                                </button>
-                                                <!-- Toggle response body -->
-                                                <button @click="showInlineResponse = !showInlineResponse"
-                                                        class="p-1 text-ide-muted hover:text-ide-fg rounded transition-colors" title="Toggle response">
-                                                    <svg class="w-3 h-3 transition-transform" :class="showInlineResponse ? 'rotate-90' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-                                                </button>
+                                        </div><!-- END TEST TAB -->
+
+                                        <!-- ==================== VARIABLES TAB ==================== -->
+                                        <div x-show="stepTab === 'variables'" class="space-y-4">
+
+                                        <!-- Extract Variables Section -->
+                                        <div x-data="{ expanded: true, vName: '', vPath: '' }">
+                                            <button @click="expanded = !expanded" class="text-sm text-gray-500 hover:text-ide-fg flex items-center gap-1.5 mb-2">
+                                                <svg class="w-3.5 h-3.5 transition-transform" :class="{ 'rotate-90': expanded }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                                                </svg>
+                                                <span x-text="'Extract ' + Object.keys(step.extractVariables || {}).length + ' variables'"></span>
+                                            </button>
+
+                                            <div x-show="expanded" x-collapse class="space-y-2">
+                                                <!-- Response fields picker -->
+                                                <div x-data="{
+                                                        showFields: false,
+                                                        fieldSearch: '',
+                                                        get responseFields() {
+                                                            const fields = getResponseFieldsForEndpoint(step.endpoint, step.expectedStatus);
+                                                            const idx = step.extractArrayIndex || 0;
+                                                            if (idx === 0) return fields;
+                                                            return fields.map(f => ({
+                                                                ...f,
+                                                                path: f.path.replace(/^data\.0\./, `data.${idx}.`).replace(/^data\.0$/, `data.${idx}`)
+                                                            }));
+                                                        },
+                                                        get isArrayResponse() {
+                                                            const fields = getResponseFieldsForEndpoint(step.endpoint, step.expectedStatus);
+                                                            return fields.some(f => /^data\.\d+\./.test(f.path));
+                                                        },
+                                                        get filteredResponseFields() {
+                                                            if (!this.fieldSearch) return this.responseFields;
+                                                            const q = this.fieldSearch.toLowerCase();
+                                                            return this.responseFields.filter(f => f.name.toLowerCase().includes(q) || f.path.toLowerCase().includes(q));
+                                                        }
+                                                     }"
+                                                     x-show="responseFields.length > 0" class="mt-2">
+                                                    <button @click="showFields = !showFields" class="flex items-center gap-1.5 text-sm text-ide-muted hover:text-ide-fg transition-colors w-full">
+                                                        <svg class="w-3.5 h-3.5 transition-transform" :class="{ 'rotate-90': showFields }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                                                        </svg>
+                                                        <span>Pick from response</span>
+                                                        <template x-if="step.expectedStatus">
+                                                            <span class="text-xs font-mono px-1 py-0.5 rounded"
+                                                                  :class="step.expectedStatus >= 400 ? 'bg-amber-500/10 text-amber-600' : 'bg-green-500/10 text-green-600'"
+                                                                  x-text="step.expectedStatus"></span>
+                                                        </template>
+                                                        <span class="ml-auto text-xs text-ide-muted" x-text="fieldSearch ? (filteredResponseFields.length + '/' + responseFields.length + ' fields') : (responseFields.length + ' fields')"></span>
+                                                    </button>
+                                                    <div x-show="showFields" x-collapse class="mt-1.5">
+                                                        <!-- Array index selector -->
+                                                        <template x-if="isArrayResponse">
+                                                            <div class="flex items-center gap-2 mb-1.5 px-1 py-1 bg-amber-500/5 border border-amber-500/20 rounded">
+                                                                <svg class="w-3.5 h-3.5 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
+                                                                <span class="text-xs text-ide-muted whitespace-nowrap">Array response — extract from item #</span>
+                                                                <input type="number"
+                                                                       :value="step.extractArrayIndex || 0"
+                                                                       @input="const oldIdx = step.extractArrayIndex || 0; step.extractArrayIndex = Math.max(0, parseInt($event.target.value) || 0); updateExtractArrayIndex(step, oldIdx, step.extractArrayIndex); reExtractVariablesForStep(newFlow.steps.indexOf(step));"
+                                                                       min="0"
+                                                                       class="w-14 px-1.5 py-0.5 text-xs font-mono bg-ide-surface border border-ide-border rounded text-ide-fg focus:ring-1 focus:ring-ide-primary">
+                                                                <template x-if="flowRunResults[newFlow.steps.indexOf(step)]?.data?.data && Array.isArray(flowRunResults[newFlow.steps.indexOf(step)].data.data)">
+                                                                    <span class="text-xs text-ide-muted" x-text="'of ' + flowRunResults[newFlow.steps.indexOf(step)].data.data.length + ' items'"></span>
+                                                                </template>
+                                                            </div>
+                                                        </template>
+                                                        <template x-if="responseFields.length > 10">
+                                                            <input type="text" x-model="fieldSearch" placeholder="Search fields..."
+                                                                   class="w-full px-2 py-1 mb-1.5 text-xs bg-ide-surface border border-ide-border rounded text-ide-fg placeholder-gray-400 font-mono focus:ring-1 focus:ring-ide-primary">
+                                                        </template>
+                                                        <div class="flex flex-wrap gap-1 max-h-48 overflow-y-auto">
+                                                            <template x-for="field in filteredResponseFields" :key="field.path">
+                                                                <button @click="step.extractVariables = step.extractVariables || {};
+                                                                        const vn = fieldVarName(field.path);
+                                                                        if (step.extractVariables[vn] === field.path) {
+                                                                            delete step.extractVariables[vn];
+                                                                            step.extractVariables = {...step.extractVariables};
+                                                                        } else {
+                                                                            step.extractVariables[vn] = field.path;
+                                                                        }
+                                                                        reExtractVariablesForStep(newFlow.steps.indexOf(step));"
+                                                                        class="inline-flex items-center gap-1 px-2 py-1 text-sm font-mono rounded-md border transition-all"
+                                                                        :class="step.extractVariables?.[fieldVarName(field.path)] === field.path
+                                                                            ? 'bg-green-500/10 border-green-500/30 text-green-700 dark:text-green-400'
+                                                                            : 'bg-ide-surface border-ide-border text-ide-muted hover:text-ide-fg hover:border-ide-fg/30'"
+                                                                        :title="fieldVarName(field.path) + ' → ' + field.path">
+                                                                    <span x-text="fieldVarName(field.path)"></span>
+                                                                    <span class="text-[9px] opacity-50" x-text="field.type"></span>
+                                                                    <template x-if="flowRunResults[newFlow.steps.indexOf(step)]?.data">
+                                                                        <span class="text-[9px] truncate max-w-[80px]"
+                                                                              :class="step.extractVariables?.[fieldVarName(field.path)] === field.path ? 'opacity-70' : 'opacity-40'"
+                                                                              x-text="'= ' + JSON.stringify(getValueByPath(flowRunResults[newFlow.steps.indexOf(step)].data, field.path))?.substring(0, 20)"></span>
+                                                                    </template>
+                                                                </button>
+                                                            </template>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <!-- Add custom variable -->
+                                                <div class="flex items-center gap-2 mt-2">
+                                                    <input type="text" x-model="vName" placeholder="var name"
+                                                           class="w-24 px-2 py-1.5 text-sm border border-ide-border rounded bg-ide-surface text-ide-fg placeholder-gray-400">
+                                                    <span class="text-gray-400">=</span>
+                                                    <input type="text" x-model="vPath" placeholder="data.id"
+                                                           class="flex-1 px-2 py-1.5 text-sm border border-ide-border rounded bg-ide-surface text-ide-fg placeholder-gray-400 font-mono">
+                                                    <button @click="if(vName && vPath) { step.extractVariables = step.extractVariables || {}; step.extractVariables[vName] = vPath; reExtractVariablesForStep(newFlow.steps.indexOf(step)); vName = ''; vPath = ''; }"
+                                                            class="px-2 py-1.5 text-sm bg-ide-fg text-ide-bg rounded hover:opacity-90 transition-colors">Add</button>
+                                                </div>
                                             </div>
                                         </div>
-                                        <!-- Extracted Variables (compact pills) -->
-                                        <template x-if="flowRunResults[index]?.extractedVars && Object.keys(flowRunResults[index].extractedVars).length">
-                                            <div class="px-3 pb-1.5 flex flex-wrap gap-1">
-                                                <template x-for="(val, key) in flowRunResults[index].extractedVars" :key="key">
-                                                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] bg-ide-primary/10 rounded font-mono">
-                                                        <span class="text-ide-primary" x-text="key"></span>
-                                                        <span class="text-gray-400">=</span>
-                                                        <span class="text-ide-muted truncate max-w-[120px]" x-text="JSON.stringify(val).substring(0, 25)"></span>
-                                                    </span>
-                                                </template>
-                                            </div>
-                                        </template>
-                                        <!-- Assertion Results -->
-                                        <template x-if="flowRunResults[index]?.assertionResults && flowRunResults[index].assertionResults.length > 0">
-                                            <div class="px-3 pb-1.5 space-y-0.5">
-                                                <template x-for="(ar, arIdx) in flowRunResults[index].assertionResults" :key="arIdx">
-                                                    <div class="text-[10px] flex items-center gap-1.5">
-                                                        <span class="font-bold" :class="ar.passed ? 'text-green-600' : 'text-red-600'" x-text="ar.passed ? 'PASS' : 'FAIL'"></span>
-                                                        <span class="text-ide-muted">
-                                                            <span x-text="ar.type"></span><template x-if="ar.path"><span x-text="'(' + ar.path + ')'"></span></template>
-                                                            <span x-text="ar.operator"></span>
-                                                            <template x-if="ar.operator !== 'exists' && ar.operator !== 'notExists'"><span class="font-mono" x-text="ar.expected"></span></template>
-                                                        </span>
-                                                        <template x-if="!ar.passed">
-                                                            <span class="text-red-500 truncate" x-text="'got: ' + JSON.stringify(ar.actual)"></span>
+
+                                        <!-- Computed Variables Section -->
+                                        <div class="mt-4 pt-4 border-t border-ide-border" x-data="{ expanded: (step.computedVariables || []).length > 0 }">
+                                            <button @click="expanded = !expanded" class="text-sm text-gray-500 hover:text-ide-fg flex items-center gap-1.5 mb-2">
+                                                <svg class="w-3.5 h-3.5 transition-transform" :class="{ 'rotate-90': expanded }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                                                </svg>
+                                                <span x-text="'Computed Variables (' + (step.computedVariables || []).length + ')'"></span>
+                                            </button>
+
+                                            <div x-show="expanded" x-collapse class="space-y-2">
+                                                <template x-for="(cv, cvIdx) in step.computedVariables || []" :key="cvIdx">
+                                                    <div class="flex items-center gap-1.5 text-sm">
+                                                        <input type="text" x-model="cv.name" placeholder="varName"
+                                                               class="w-28 px-1.5 py-1.5 bg-ide-surface border border-ide-border rounded text-ide-fg font-mono text-sm">
+                                                        <span class="text-gray-400 font-mono">=</span>
+                                                        <input type="text" x-model="cv.expression" placeholder="@{{step1.var}} + @{{step2.var}}"
+                                                               class="flex-1 px-1.5 py-1.5 bg-ide-surface border border-ide-border rounded text-ide-fg font-mono text-sm">
+                                                        <template x-if="flowRunResults[newFlow.steps.indexOf(step)]?.data">
+                                                            <span class="px-1.5 py-0.5 text-xs font-mono rounded shrink-0 max-w-[80px] truncate"
+                                                                  :class="evaluateComputedExpression(cv.expression, flowVariables)?.error
+                                                                      ? 'bg-red-500/10 text-red-500'
+                                                                      : 'bg-purple-500/10 text-purple-600 dark:text-purple-400'"
+                                                                  :title="JSON.stringify(evaluateComputedExpression(cv.expression, flowVariables)?.value ?? evaluateComputedExpression(cv.expression, flowVariables)?.error)"
+                                                                  x-text="evaluateComputedExpression(cv.expression, flowVariables)?.error
+                                                                      ? 'Error'
+                                                                      : JSON.stringify(evaluateComputedExpression(cv.expression, flowVariables)?.value)?.substring(0, 15)"></span>
                                                         </template>
+                                                        <button @click="step.computedVariables.splice(cvIdx, 1)" class="p-1 text-gray-400 hover:text-red-500">
+                                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                                        </button>
                                                     </div>
                                                 </template>
+
+                                                <button @click="step.computedVariables = step.computedVariables || []; step.computedVariables.push({ name: '', expression: '' })"
+                                                        class="text-sm text-ide-primary hover:underline mt-1">+ Add computed variable</button>
+                                            </div>
+                                        </div>
+
+                                        </div><!-- END VARIABLES TAB -->
+
+                                        </div><!-- END Tab Content -->
+
+                                        <!-- Inline Result Section (inside card) -->
+                                        <template x-if="flowRunResults[index]">
+                                            <div x-data="{ showInlineResponse: false, resultExpanded: true }">
+                                                <div class="mt-4 border-t border-ide-border">
+                                                    <button @click="resultExpanded = !resultExpanded"
+                                                            class="w-full px-4 py-2.5 flex items-center justify-between gap-2 hover:bg-ide-surface/50 transition-colors">
+                                                        <div class="flex items-center gap-2 min-w-0">
+                                                            <svg class="w-3 h-3 transition-transform text-ide-muted" :class="resultExpanded ? 'rotate-90' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                                                            <span class="text-xs font-semibold uppercase text-ide-muted">Result</span>
+                                                            <span class="px-1.5 py-0.5 text-[10px] font-bold rounded font-mono"
+                                                                  :class="{
+                                                                      'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400': flowRunResults[index]?.success,
+                                                                      'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400': flowRunResults[index]?.httpOk && !flowRunResults[index]?.allAssertionsPassed,
+                                                                      'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400': !flowRunResults[index]?.httpOk
+                                                                  }"
+                                                                  x-text="flowRunResults[index]?.status || 'ERR'"></span>
+                                                            <span x-show="flowRunResults[index]?.duration" class="text-[10px] font-mono text-ide-muted" x-text="flowRunResults[index]?.duration + 'ms'"></span>
+                                                            <span class="text-[10px] font-bold"
+                                                                  :class="flowRunResults[index]?.success ? 'text-green-600' : 'text-red-600'"
+                                                                  x-text="flowRunResults[index]?.success ? 'PASS' : 'FAIL'"></span>
+                                                        </div>
+                                                        <div class="flex items-center gap-1">
+                                                            <span @click.stop="openFlowResponseDialog(index)"
+                                                                    class="p-1 text-ide-muted hover:text-ide-primary rounded transition-colors" title="Expand response">
+                                                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
+                                                            </span>
+                                                        </div>
+                                                    </button>
+                                                    <div x-show="resultExpanded" x-collapse>
+                                                        <div class="px-4 pb-3">
+                                                            <template x-if="flowRunResults[index]?.extractedVars && Object.keys(flowRunResults[index].extractedVars).length">
+                                                                <div class="pb-2 flex flex-wrap gap-1">
+                                                                    <template x-for="(val, key) in flowRunResults[index].extractedVars" :key="key">
+                                                                        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded font-mono"
+                                                                              :class="(newFlow.steps[index]?.computedVariables || []).some(cv => cv.name === key) ? 'bg-purple-500/10' : 'bg-ide-primary/10'">
+                                                                            <span :class="(newFlow.steps[index]?.computedVariables || []).some(cv => cv.name === key) ? 'text-purple-600 dark:text-purple-400' : 'text-ide-primary'" x-text="key"></span>
+                                                                            <span class="text-gray-400">=</span>
+                                                                            <span class="text-ide-muted truncate max-w-[120px]" x-text="JSON.stringify(val).substring(0, 25)"></span>
+                                                                        </span>
+                                                                    </template>
+                                                                </div>
+                                                            </template>
+                                                            <template x-if="flowRunResults[index]?.assertionResults && flowRunResults[index].assertionResults.length > 0">
+                                                                <div class="pb-2 space-y-0.5">
+                                                                    <template x-for="(ar, arIdx) in flowRunResults[index].assertionResults" :key="arIdx">
+                                                                        <div class="text-[10px] flex items-center gap-1.5">
+                                                                            <span class="font-bold" :class="ar.passed ? 'text-green-600' : 'text-red-600'" x-text="ar.passed ? 'PASS' : 'FAIL'"></span>
+                                                                            <span class="text-ide-muted">
+                                                                                <span x-text="ar.type"></span><template x-if="ar.path"><span x-text="'(' + ar.path + ')'"></span></template>
+                                                                                <span x-text="ar.operator"></span>
+                                                                                <template x-if="ar.operator !== 'exists' && ar.operator !== 'notExists'"><span class="font-mono" x-text="ar.expected"></span></template>
+                                                                            </span>
+                                                                            <template x-if="!ar.passed">
+                                                                                <span class="text-red-500 truncate" x-text="'got: ' + JSON.stringify(ar.actual)"></span>
+                                                                            </template>
+                                                                        </div>
+                                                                    </template>
+                                                                </div>
+                                                            </template>
+                                                            <div class="mt-1">
+                                                                <button @click="showInlineResponse = !showInlineResponse"
+                                                                        class="flex items-center gap-1 text-[10px] text-ide-muted hover:text-ide-fg transition-colors mb-1">
+                                                                    <svg class="w-2.5 h-2.5 transition-transform" :class="showInlineResponse ? 'rotate-90' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                                                                    <span>Response Body</span>
+                                                                </button>
+                                                                <div x-show="showInlineResponse" x-collapse>
+                                                                    <pre class="p-2 bg-ide-surface rounded text-xs overflow-auto font-mono max-h-40 border border-ide-border/50"><code x-html="syntaxHighlightJson(flowRunResults[index]?.data)"></code></pre>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
                                             </div>
                                         </template>
-                                        <!-- Collapsible Response Body -->
-                                        <div x-show="showInlineResponse" x-collapse>
-                                            <pre class="mx-3 mb-2 p-2 bg-ide-bg rounded text-xs overflow-auto font-mono max-h-40 border border-ide-border/50"><code x-html="syntaxHighlightJson(flowRunResults[index]?.data)"></code></pre>
-                                        </div>
                                     </div>
-                                </template>
+                                </div>
                             </div>
                         </template>
 
-                        <!-- Add Step Button -->
-                        <div class="relative ml-12" x-data="{ searching: false, query: '' }">
-                            <button @click="searching = !searching; query = ''; $nextTick(() => $refs.stepSearch?.focus())"
-                                    class="w-full py-3 border border-ide-border bg-ide-bg rounded-lg hover:bg-ide-line-active transition-colors flex items-center justify-center gap-2 text-ide-muted hover:text-ide-fg">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-                                </svg>
-                                <span class="text-sm font-medium">Add Step</span>
-                            </button>
+                        <!-- Add Step Button (sticky at bottom) -->
+                        <div class="sticky bottom-0 pt-4 pb-2 bg-gradient-to-t from-ide-bg via-ide-bg to-transparent">
+                            <div class="relative ml-12" x-data="{ searching: false, query: '' }">
+                                <button @click="searching = !searching; query = ''; $nextTick(() => $refs.stepSearch?.focus())"
+                                        class="w-full py-3 border border-ide-border bg-ide-bg rounded-lg hover:bg-ide-line-active transition-colors flex items-center justify-center gap-2 text-ide-muted hover:text-ide-fg">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                                    </svg>
+                                    <span class="text-sm font-medium">Add Step</span>
+                                </button>
 
-                            <!-- Inline Endpoint Search -->
-                            <div x-show="searching" x-transition @click.away="searching = false"
-                                 class="absolute left-0 right-0 mt-2 bg-ide-bg rounded-lg shadow-lg border border-ide-border overflow-hidden z-20">
-                                <div class="p-2 border-b border-ide-border">
-                                    <input type="text" x-model="query" placeholder="Search endpoints..." x-ref="stepSearch"
-                                           @keydown.escape="searching = false"
-                                           class="w-full px-3 py-2 text-sm border-0 bg-ide-bg rounded-md text-ide-fg focus:ring-0">
-                                </div>
-                                <div class="max-h-72 overflow-y-auto">
-                                    <template x-for="ep in endpoints.filter(e => !query || e.path.toLowerCase().includes(query.toLowerCase()) || (e.summary || '').toLowerCase().includes(query.toLowerCase())).slice(0, 20)" :key="ep.path + ep.method">
-                                        <button @click="addEndpointToFlow(ep); searching = false; query = ''"
-                                                class="w-full px-3 py-2 text-left hover:bg-ide-line-active flex items-center gap-3 transition-colors">
-                                            <span class="px-1.5 py-0.5 text-[10px] font-bold rounded" :class="getMethodBadgeClass(ep.method)" x-text="ep.method.toUpperCase()"></span>
-                                            <div class="flex-1 min-w-0">
-                                                <div class="text-sm font-mono truncate text-ide-fg" x-text="ep.path"></div>
-                                            </div>
-                                        </button>
-                                    </template>
-                                    <div x-show="endpoints.filter(e => !query || e.path.toLowerCase().includes(query.toLowerCase())).length === 0" class="px-4 py-8 text-center text-gray-400 text-sm">
-                                        No endpoints found
+                                <!-- Inline Endpoint Search (opens upward) -->
+                                <div x-show="searching" x-transition @click.away="searching = false"
+                                     class="absolute left-0 right-0 bottom-full mb-2 bg-ide-bg rounded-lg shadow-lg border border-ide-border overflow-hidden z-20">
+                                    <div class="p-2 border-b border-ide-border">
+                                        <input type="text" x-model="query" placeholder="Search endpoints..." x-ref="stepSearch"
+                                               @keydown.escape="searching = false"
+                                               class="w-full px-3 py-2 text-sm border-0 bg-ide-bg rounded-md text-ide-fg focus:ring-0">
+                                    </div>
+                                    <div class="max-h-72 overflow-y-auto">
+                                        <template x-for="ep in endpoints.filter(e => !query || e.path.toLowerCase().includes(query.toLowerCase()) || (e.summary || '').toLowerCase().includes(query.toLowerCase())).slice(0, 20)" :key="ep.path + ep.method">
+                                            <button @click="addEndpointToFlow(ep); searching = false; query = ''"
+                                                    class="w-full px-3 py-2 text-left hover:bg-ide-line-active flex items-center gap-3 transition-colors">
+                                                <span class="px-1.5 py-0.5 text-[10px] font-bold rounded" :class="getMethodBadgeClass(ep.method)" x-text="ep.method.toUpperCase()"></span>
+                                                <div class="flex-1 min-w-0">
+                                                    <div class="text-sm font-mono truncate text-ide-fg" x-text="ep.path"></div>
+                                                </div>
+                                            </button>
+                                        </template>
+                                        <div x-show="endpoints.filter(e => !query || e.path.toLowerCase().includes(query.toLowerCase())).length === 0" class="px-4 py-8 text-center text-gray-400 text-sm">
+                                            No endpoints found
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -4067,9 +4272,11 @@
                 </div>
             </div>
 
-            <!-- Right Sidebar: Variables (sticky, always visible when variables exist) -->
-            <div x-show="Object.keys(flowVariables).length > 0" x-transition
+            <!-- Right Sidebar: Variables (always visible when editing/creating flow) -->
+            <div x-show="editingFlow || isCreatingFlow"
                  class="w-64 bg-ide-bg border-l border-ide-border flex flex-col flex-shrink-0">
+                <!-- When has variables -->
+                <div x-show="Object.keys(flowVariables).length > 0" class="flex flex-col h-full">
                 <div x-data="{ varsExpanded: true, showVarsDialog: false }" class="flex flex-col h-full">
                     <div class="w-full px-4 py-3 flex items-center justify-between border-b border-ide-border flex-shrink-0">
                         <button @click="varsExpanded = !varsExpanded" class="flex items-center gap-1.5 hover:opacity-80 transition-opacity">
@@ -4143,6 +4350,25 @@
                                     </div>
                                 </template>
                             </div>
+                        </div>
+                    </div>
+                </div>
+                </div>
+
+                <!-- Empty state (no variables yet) -->
+                <div x-show="Object.keys(flowVariables).length === 0" class="flex-1 flex flex-col">
+                    <div class="w-full px-4 py-3 border-b border-ide-border flex-shrink-0">
+                        <h4 class="text-xs font-semibold text-ide-muted uppercase flex items-center gap-1.5">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>
+                            Variables
+                        </h4>
+                    </div>
+                    <div class="flex-1 flex items-center justify-center p-6">
+                        <div class="text-center">
+                            <svg class="w-8 h-8 mx-auto mb-3 text-ide-muted/30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/>
+                            </svg>
+                            <p class="text-xs text-ide-muted/50">Variables will appear here after running the flow</p>
                         </div>
                     </div>
                 </div>
@@ -4538,12 +4764,21 @@
                 loginPassword: '',
                 loginError: '',
                 loginLoading: false,
+                detectedLoginPaths: [],  // All login endpoints found in spec
+                selectedLoginPath: '',   // Currently selected login endpoint path
+
+                // Multi-Session Auth State
+                authSessions: (() => { try { return JSON.parse(localStorage.getItem('apiura_auth_sessions') || '[]'); } catch { return []; } })(),
+                activeSessionId: localStorage.getItem('apiura_active_session_id') || null,
+                sessionOverrideId: null,  // per-request manual override, reset on endpoint switch
+                showSessionManager: false,
+                sessionColors: ['emerald', 'blue', 'amber', 'purple', 'rose', 'cyan'],
 
                 // Environment Profiles State
                 environments: (() => { try { return JSON.parse(localStorage.getItem('apiura_environments') || '[]'); } catch { return []; } })(),
                 activeEnvironment: localStorage.getItem('apiura_active_env') || null,
                 showEnvModal: false,
-                newEnv: { name: '', baseUrl: '', token: '', headers: {}, color: 'green' },
+                newEnv: { name: '', baseUrl: '', token: '', loginPath: '', headers: {}, color: 'green' },
 
                 // UI State
                 sidebarOpen: false,
@@ -4800,6 +5035,7 @@
                 init() {
                     this.enrichResponseSchemas();
                     this.parseEndpoints();
+                    this.detectLoginPaths();
                     // Expand all tags by default
                     Object.keys(this.endpointsByTag).forEach(tag => {
                         this.expandedTags[tag] = true;
@@ -4898,6 +5134,7 @@
                         if (this.showFlowsPanel) { this.showFlowsPanel = false; this.isCreatingFlow = false; this.editingFlow = null; return; }
                         if (this.showShortcuts) { this.showShortcuts = false; return; }
                         if (this.showEnvModal) { this.showEnvModal = false; return; }
+                        if (this.showSessionManager) { this.showSessionManager = false; return; }
                         if (this.showTelescope) { this.showTelescope = false; return; }
                         if (this.showImportCurl) { this.showImportCurl = false; return; }
                         if (this.showSavedRequestsPanel) { this.showSavedRequestsPanel = false; return; }
@@ -4920,7 +5157,7 @@
                         document.documentElement.classList.toggle('dark', val);
                         document.body.classList.toggle('dark', val);
                     });
-                    // Watch auth token changes
+                    // Watch auth token changes (backward compat — keeps apiura_token in sync)
                     this.$watch('authToken', val => {
                         if (val) {
                             localStorage.setItem('apiura_token', val);
@@ -4929,12 +5166,49 @@
                         }
                     });
 
+                    // Watch auth sessions for persistence
+                    this.$watch('authSessions', val => {
+                        localStorage.setItem('apiura_auth_sessions', JSON.stringify(val));
+                        this.syncAuthToken();
+                    });
+                    this.$watch('activeSessionId', val => {
+                        if (val) {
+                            localStorage.setItem('apiura_active_session_id', val);
+                        } else {
+                            localStorage.removeItem('apiura_active_session_id');
+                        }
+                        this.syncAuthToken();
+                    });
+                    this.$watch('sessionOverrideId', () => {
+                        this.syncAuthToken();
+                    });
+                    this.$watch('selectedEndpoint', () => {
+                        this.sessionOverrideId = null;
+                        this.syncAuthToken();
+                    });
+
+                    // Legacy migration: if authSessions empty but apiura_token exists, create a legacy session
+                    if (this.authSessions.length === 0 && this.authToken) {
+                        const legacySession = {
+                            id: 'legacy-' + Date.now(),
+                            loginPath: '',
+                            pathPrefix: '',
+                            token: this.authToken,
+                            email: '',
+                            label: 'Legacy Token',
+                            color: this.sessionColors[0],
+                            loggedInAt: new Date().toISOString(),
+                        };
+                        this.authSessions = [legacySession];
+                        this.activeSessionId = legacySession.id;
+                    }
+
                     // Initialize environments
                     if (this.environments.length === 0) {
                         this.environments = [
-                            { id: 'local', name: 'Local', baseUrl: '', token: '', headers: {}, color: 'green' },
-                            { id: 'staging', name: 'Staging', baseUrl: '', token: '', headers: {}, color: 'yellow' },
-                            { id: 'production', name: 'Production', baseUrl: '', token: '', headers: {}, color: 'red' }
+                            { id: 'local', name: 'Local', baseUrl: '', token: '', loginPath: '', headers: {}, color: 'green' },
+                            { id: 'staging', name: 'Staging', baseUrl: '', token: '', loginPath: '', headers: {}, color: 'yellow' },
+                            { id: 'production', name: 'Production', baseUrl: '', token: '', loginPath: '', headers: {}, color: 'red' }
                         ];
                     }
 
@@ -5025,7 +5299,8 @@
                                     tags: details.tags || ['Untagged'],
                                     parameters: details.parameters || [],
                                     requestBody: details.requestBody || null,
-                                    responses: details.responses || {}
+                                    responses: details.responses || {},
+                                    security: details.security || null
                                 };
 
                                 this.endpoints.push(endpoint);
@@ -5130,6 +5405,7 @@
                             apiError: this.apiError,
                             responseTruncated: this.responseTruncated,
                             showFullHighlighted: this.showFullHighlighted,
+                            sessionOverrideId: this.sessionOverrideId,
                         };
                     }
                 },
@@ -5147,6 +5423,7 @@
                         this.apiError = state.apiError;
                         this.responseTruncated = state.responseTruncated || false;
                         this.showFullHighlighted = state.showFullHighlighted || false;
+                        this.sessionOverrideId = state.sessionOverrideId || null;
                         return true;
                     }
                     return false;
@@ -5302,17 +5579,21 @@
                         '200': 'OK',
                         '201': 'Created',
                         '204': 'No Content',
+                        '301': 'Moved Permanently',
+                        '302': 'Found',
+                        '304': 'Not Modified',
                         '400': 'Bad Request',
                         '401': 'Unauthorized',
                         '403': 'Forbidden',
                         '404': 'Not Found',
+                        '405': 'Method Not Allowed',
                         '422': 'Unprocessable Entity',
                         '429': 'Too Many Requests',
                         '500': 'Internal Server Error',
                         '502': 'Bad Gateway',
                         '503': 'Service Unavailable'
                     };
-                    return texts[status] || '';
+                    return texts[String(status)] || '';
                 },
 
                 // Format JSON for display
@@ -6703,7 +6984,35 @@
                     const env = this.environments.find(e => e.id === envId);
                     if (env) {
                         if (env.baseUrl) this.customBaseUrl = env.baseUrl;
-                        if (env.token) this.authToken = env.token;
+                        if (env.token) {
+                            // Create or activate a session from the environment's token
+                            const existingEnvSession = this.authSessions.find(s => s.loginPath === 'env:' + envId);
+                            if (existingEnvSession) {
+                                existingEnvSession.token = env.token;
+                                this.authSessions = [...this.authSessions];
+                                this.activeSessionId = existingEnvSession.id;
+                            } else {
+                                const sessionId = 'env-' + envId + '-' + Date.now();
+                                this.authSessions.push({
+                                    id: sessionId,
+                                    loginPath: 'env:' + envId,
+                                    pathPrefix: '',
+                                    token: env.token,
+                                    email: '',
+                                    label: env.name || 'Environment',
+                                    color: this.getNextSessionColor(),
+                                    loggedInAt: new Date().toISOString(),
+                                });
+                                this.activeSessionId = sessionId;
+                            }
+                            this.syncAuthToken();
+                        }
+                        // Apply the environment's login path if set
+                        if (env.loginPath) {
+                            this.selectedLoginPath = env.loginPath;
+                        } else if (this.detectedLoginPaths.length > 0) {
+                            this.selectedLoginPath = this.detectedLoginPaths[0].path;
+                        }
                     }
                 },
 
@@ -6715,7 +7024,7 @@
                     const id = this.newEnv.name.toLowerCase().replace(/\s+/g, '-') + '-' + Date.now();
                     this.environments.push({ id, ...this.newEnv });
                     this.saveEnvironments();
-                    this.newEnv = { name: '', baseUrl: '', token: '', headers: {}, color: 'green' };
+                    this.newEnv = { name: '', baseUrl: '', token: '', loginPath: '', headers: {}, color: 'green' };
                     this.showEnvModal = false;
                 },
 
@@ -7028,11 +7337,6 @@
                     } catch (e) {
                         this.showToast('Failed to load Telescope entry detail', 'error');
                     }
-                },
-
-                getStatusText(status) {
-                    const texts = { 200: 'OK', 201: 'Created', 204: 'No Content', 301: 'Moved Permanently', 302: 'Found', 304: 'Not Modified', 400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not Found', 405: 'Method Not Allowed', 422: 'Unprocessable Entity', 429: 'Too Many Requests', 500: 'Internal Server Error', 502: 'Bad Gateway', 503: 'Service Unavailable' };
-                    return texts[status] || '';
                 },
 
                 // ============ DESIGN TAB HELPERS ============
@@ -7633,6 +7937,11 @@
                             this.sidebarVisible = true;
                             this.$nextTick(() => this.$refs.searchInput?.focus());
                         }
+                        // Ctrl/Cmd + W: Close current tab
+                        if ((e.ctrlKey || e.metaKey) && e.key === 'w') {
+                            e.preventDefault();
+                            if (this.activeTabId) this.closeTab(this.activeTabId);
+                        }
                         // Escape is handled by centralized handler in init()
                         // ? key: Show keyboard shortcuts (when not in an input)
                         if (e.key === '?' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) {
@@ -7647,13 +7956,176 @@
                     });
                 },
 
+                // ============ SESSION MANAGEMENT METHODS ============
+
+                getEffectiveSession() {
+                    // Manual override takes priority
+                    if (this.sessionOverrideId === '__none__') return null;
+                    if (this.sessionOverrideId) {
+                        const override = this.authSessions.find(s => s.id === this.sessionOverrideId);
+                        if (override) return override;
+                    }
+                    // Auto-match by endpoint path
+                    if (this.selectedEndpoint?.path) {
+                        const matched = this.autoMatchSession(this.selectedEndpoint.path);
+                        if (matched) return matched;
+                    }
+                    // Active session
+                    if (this.activeSessionId) {
+                        const active = this.authSessions.find(s => s.id === this.activeSessionId);
+                        if (active) return active;
+                    }
+                    // Single session fallback
+                    if (this.authSessions.length === 1) return this.authSessions[0];
+                    return null;
+                },
+
+                syncAuthToken() {
+                    const session = this.getEffectiveSession();
+                    this.authToken = session?.token || '';
+                },
+
+                autoMatchSession(endpointPath) {
+                    if (!endpointPath || this.authSessions.length <= 1) return null;
+                    let bestMatch = null;
+                    let bestLen = 0;
+                    for (const session of this.authSessions) {
+                        if (session.pathPrefix && endpointPath.startsWith(session.pathPrefix) && session.pathPrefix.length > bestLen) {
+                            bestMatch = session;
+                            bestLen = session.pathPrefix.length;
+                        }
+                    }
+                    return bestMatch;
+                },
+
+                derivePathPrefix(loginPath) {
+                    if (!loginPath) return '';
+                    // e.g. /api/v1/admin/login → /api/v1/admin
+                    const parts = loginPath.replace(/\/$/, '').split('/');
+                    parts.pop(); // remove 'login'
+                    return parts.join('/') || '/';
+                },
+
+                deriveSessionLabel(loginPath) {
+                    if (!loginPath) return 'Session';
+                    // e.g. /api/v1/admin/login → "Admin"
+                    const parts = loginPath.replace(/\/$/, '').split('/').filter(Boolean);
+                    // Remove common parts like 'api', 'v1', 'login'
+                    const meaningful = parts.filter(p => !['api', 'login', 'auth', 'authenticate'].includes(p.toLowerCase()) && !/^v\d+$/.test(p));
+                    if (meaningful.length > 0) {
+                        const last = meaningful[meaningful.length - 1];
+                        return last.charAt(0).toUpperCase() + last.slice(1);
+                    }
+                    return 'Default';
+                },
+
+                getNextSessionColor() {
+                    const used = this.authSessions.map(s => s.color);
+                    return this.sessionColors.find(c => !used.includes(c)) || this.sessionColors[this.authSessions.length % this.sessionColors.length];
+                },
+
+                getSessionColorClasses(color, variant) {
+                    const map = {
+                        emerald: { pill: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30', dot: 'bg-emerald-500', pillActive: 'bg-emerald-500/30 text-emerald-300 border-emerald-400/50 ring-1 ring-emerald-400/30', badge: 'bg-emerald-500 text-white' },
+                        blue: { pill: 'bg-blue-500/20 text-blue-400 border-blue-500/30', dot: 'bg-blue-500', pillActive: 'bg-blue-500/30 text-blue-300 border-blue-400/50 ring-1 ring-blue-400/30', badge: 'bg-blue-500 text-white' },
+                        amber: { pill: 'bg-amber-500/20 text-amber-400 border-amber-500/30', dot: 'bg-amber-500', pillActive: 'bg-amber-500/30 text-amber-300 border-amber-400/50 ring-1 ring-amber-400/30', badge: 'bg-amber-500 text-white' },
+                        purple: { pill: 'bg-purple-500/20 text-purple-400 border-purple-500/30', dot: 'bg-purple-500', pillActive: 'bg-purple-500/30 text-purple-300 border-purple-400/50 ring-1 ring-purple-400/30', badge: 'bg-purple-500 text-white' },
+                        rose: { pill: 'bg-rose-500/20 text-rose-400 border-rose-500/30', dot: 'bg-rose-500', pillActive: 'bg-rose-500/30 text-rose-300 border-rose-400/50 ring-1 ring-rose-400/30', badge: 'bg-rose-500 text-white' },
+                        cyan: { pill: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30', dot: 'bg-cyan-500', pillActive: 'bg-cyan-500/30 text-cyan-300 border-cyan-400/50 ring-1 ring-cyan-400/30', badge: 'bg-cyan-500 text-white' },
+                    };
+                    return map[color]?.[variant] || map.emerald[variant];
+                },
+
+                removeSession(sessionId) {
+                    this.authSessions = this.authSessions.filter(s => s.id !== sessionId);
+                    if (this.activeSessionId === sessionId) {
+                        this.activeSessionId = this.authSessions.length > 0 ? this.authSessions[0].id : null;
+                    }
+                    if (this.sessionOverrideId === sessionId) {
+                        this.sessionOverrideId = null;
+                    }
+                    this.syncAuthToken();
+                    this.showToast('Session removed');
+                },
+
+                isAutoMatched() {
+                    if (!this.selectedEndpoint?.path || this.sessionOverrideId) return false;
+                    const matched = this.autoMatchSession(this.selectedEndpoint.path);
+                    if (!matched) return false;
+                    // It's auto-matched if the matched session is different from the active session
+                    return matched.id !== this.activeSessionId;
+                },
+
+                getEffectiveSessionLabel() {
+                    if (this.sessionOverrideId === '__none__') return 'No Auth';
+                    const session = this.getEffectiveSession();
+                    if (!session) return 'No Auth';
+                    const suffix = this.isAutoMatched() ? ' (auto)' : '';
+                    return (session.label || 'Session') + suffix;
+                },
+
                 // ============ AUTHENTICATION METHODS ============
 
-                // Set bearer token directly
+                // Detect all POST endpoints containing "login" in the path from the OpenAPI spec
+                detectLoginPaths() {
+                    this.detectedLoginPaths = [];
+                    if (!this.spec?.paths) return;
+
+                    for (const [path, methods] of Object.entries(this.spec.paths)) {
+                        if (path.toLowerCase().includes('login') && methods.post) {
+                            const postOp = methods.post;
+                            this.detectedLoginPaths.push({
+                                path: path,
+                                summary: postOp.summary || '',
+                                tags: postOp.tags || [],
+                                description: postOp.description || ''
+                            });
+                        }
+                    }
+
+                    // Auto-select the first detected path if none is selected
+                    if (this.detectedLoginPaths.length > 0 && !this.selectedLoginPath) {
+                        // Check if active environment has a loginPath set
+                        const env = this.environments.find(e => e.id === this.activeEnvironment);
+                        if (env?.loginPath) {
+                            this.selectedLoginPath = env.loginPath;
+                        } else {
+                            this.selectedLoginPath = this.detectedLoginPaths[0].path;
+                        }
+                    }
+                },
+
+                // Get a display label for a login path (path + summary/tag context)
+                getLoginPathLabel(loginPathObj) {
+                    let label = loginPathObj.path;
+                    if (loginPathObj.summary) {
+                        label += ' - ' + loginPathObj.summary;
+                    } else if (loginPathObj.tags.length > 0) {
+                        label += ' (' + loginPathObj.tags.join(', ') + ')';
+                    }
+                    return label;
+                },
+
+                // Set bearer token directly — creates a "Manual Token" session
                 setToken(token) {
-                    this.authToken = token.trim();
+                    const trimmed = token.trim();
+                    if (!trimmed) return;
+                    const sessionId = 'manual-' + Date.now();
+                    const session = {
+                        id: sessionId,
+                        loginPath: '',
+                        pathPrefix: '',
+                        token: trimmed,
+                        email: '',
+                        label: 'Manual Token',
+                        color: this.getNextSessionColor(),
+                        loggedInAt: new Date().toISOString(),
+                    };
+                    this.authSessions.push(session);
+                    this.activeSessionId = sessionId;
                     this.tokenInput = '';
-                    this.showToast('Token saved');
+                    this.syncAuthToken();
+                    this.showToast('Token session created');
                 },
 
                 // Perform login to get token
@@ -7662,13 +8134,24 @@
 
                     const baseUrl = this.getBaseUrl();
 
-                    // Find the actual login path from the OpenAPI spec
-                    let loginPath = '/login';
-                    if (this.spec?.paths) {
-                        for (const [p, methods] of Object.entries(this.spec.paths)) {
-                            if (p.includes('login') && methods.post) {
-                                loginPath = p;
-                                break;
+                    // Determine login path: use selected path, or environment's path, or fall back to detection
+                    let loginPath = this.selectedLoginPath;
+                    if (!loginPath) {
+                        const env = this.environments.find(e => e.id === this.activeEnvironment);
+                        if (env?.loginPath) {
+                            loginPath = env.loginPath;
+                        } else if (this.detectedLoginPaths.length > 0) {
+                            loginPath = this.detectedLoginPaths[0].path;
+                        } else {
+                            // Ultimate fallback: scan spec for first login path (backward compat)
+                            loginPath = '/login';
+                            if (this.spec?.paths) {
+                                for (const [p, methods] of Object.entries(this.spec.paths)) {
+                                    if (p.includes('login') && methods.post) {
+                                        loginPath = p;
+                                        break;
+                                    }
+                                }
                             }
                         }
                     }
@@ -7712,10 +8195,35 @@
                         const token = data.token || data.access_token || data.data?.token || data.data?.access_token;
 
                         if (token) {
-                            this.authToken = token;
+                            // Create or update session for this login path
+                            const existing = this.authSessions.find(s => s.loginPath === loginPath);
+                            if (existing) {
+                                existing.token = token;
+                                existing.email = this.loginEmail;
+                                existing.loggedInAt = new Date().toISOString();
+                                // Trigger reactivity
+                                this.authSessions = [...this.authSessions];
+                                this.activeSessionId = existing.id;
+                            } else {
+                                const sessionId = 'login-' + Date.now();
+                                const session = {
+                                    id: sessionId,
+                                    loginPath: loginPath,
+                                    pathPrefix: this.derivePathPrefix(loginPath),
+                                    token: token,
+                                    email: this.loginEmail,
+                                    label: this.deriveSessionLabel(loginPath),
+                                    color: this.getNextSessionColor(),
+                                    loggedInAt: new Date().toISOString(),
+                                };
+                                this.authSessions.push(session);
+                                this.activeSessionId = sessionId;
+                            }
+                            this.syncAuthToken();
                             this.loginEmail = '';
                             this.loginPassword = '';
-                            this.showToast('Login successful');
+                            this.showLoginForm = false;
+                            this.showToast('Login successful via ' + loginPath);
                         } else {
                             throw new Error('Token not found in response');
                         }
@@ -7726,10 +8234,13 @@
                     }
                 },
 
-                // Logout and clear token
+                // Logout — clears all sessions
                 logout() {
+                    this.authSessions = [];
+                    this.activeSessionId = null;
+                    this.sessionOverrideId = null;
                     this.authToken = '';
-                    this.showToast('Logged out');
+                    this.showToast('All sessions cleared');
                 },
 
                 // ============ API REQUEST METHODS ============
@@ -8542,6 +9053,16 @@
                                 step.extractVariables || {}
                             );
 
+                            // Evaluate computed variables and merge into flowVariables
+                            const computedVars = step.computedVariables || [];
+                            for (const cv of computedVars) {
+                                if (!cv.name) continue;
+                                const cvResult = this.evaluateComputedExpression(cv.expression, this.flowVariables);
+                                if (!cvResult.error && cvResult.value !== undefined) {
+                                    this.flowVariables[stepKey][cv.name] = cvResult.value;
+                                }
+                            }
+
                             const assertions = step.assertions || [];
                             const assertionResults = this.evaluateAssertions(result, assertions, result.duration);
                             const allAssertionsPassed = assertionResults.length === 0 || assertionResults.every(a => a.passed);
@@ -8610,6 +9131,15 @@
                         const result = await this.executeFlowStep(processedStep);
                         const stepKey = `step${i + 1}`;
                         this.flowVariables[stepKey] = this.extractVariablesFromResponse(result.data, step.extractVariables || {});
+                        // Evaluate computed variables
+                        const computedVars = step.computedVariables || [];
+                        for (const cv of computedVars) {
+                            if (!cv.name) continue;
+                            const cvResult = this.evaluateComputedExpression(cv.expression, this.flowVariables);
+                            if (!cvResult.error && cvResult.value !== undefined) {
+                                this.flowVariables[stepKey][cv.name] = cvResult.value;
+                            }
+                        }
                         const assertions = step.assertions || [];
                         const assertionResults = this.evaluateAssertions(result, assertions, result.duration);
                         const allAssertionsPassed = assertionResults.length === 0 || assertionResults.every(a => a.passed);
@@ -8663,7 +9193,7 @@
                 async saveStepAsRequest(step, stepIndex) {
                     const resolveVar = (val) => {
                         if (typeof val !== 'string') return val;
-                        return val.replace(/@?\{\{(step\d+)\.(\w+)\}\}/g, (match, stepKey, varName) => {
+                        return val.replace(/@?\{\{(step\d+)\.([\w.]+)\}\}/g, (match, stepKey, varName) => {
                             return this.flowVariables[stepKey]?.[varName] ?? '';
                         });
                     };
@@ -8710,8 +9240,34 @@
                     const substitute = (obj) => {
                         if (typeof obj === 'string') {
                             // Replace step variable placeholders with actual values
-                            return obj.replace(/@?\{\{(step\d+)\.(\w+)\}\}/g, (match, stepKey, varName) => {
-                                return this.flowVariables[stepKey]?.[varName] ?? match;
+                            return obj.replace(/@?\{\{(step\d+)\.([\w.]+)\}\}/g, (match, stepKey, varName) => {
+                                // Try flowVariables first (populated when step executes)
+                                const value = this.flowVariables[stepKey]?.[varName];
+                                if (value !== undefined && value !== null) return value;
+
+                                // Fallback: extract from previous run results if extractVariables is defined
+                                const stepNum = parseInt(stepKey.replace('step', ''));
+                                const step = this.newFlow?.steps?.[stepNum - 1];
+                                const result = this.flowRunResults?.[stepNum - 1];
+                                if (step?.extractVariables?.[varName] && result?.data) {
+                                    try {
+                                        const jsonPath = step.extractVariables[varName];
+                                        const parts = jsonPath.replace(/^\$\.?/, '').split('.');
+                                        let val = result.data;
+                                        for (const part of parts) {
+                                            if (val == null) break;
+                                            val = val[part];
+                                        }
+                                        if (val !== undefined && val !== null) {
+                                            // Cache in flowVariables for next time
+                                            this.flowVariables[stepKey] = this.flowVariables[stepKey] || {};
+                                            this.flowVariables[stepKey][varName] = val;
+                                            return val;
+                                        }
+                                    } catch (e) { /* ignore extraction errors */ }
+                                }
+
+                                return match;
                             });
                         }
                         if (Array.isArray(obj)) {
@@ -8740,8 +9296,34 @@
                 // Substitute flow variables in a single string
                 substituteFlowVariableString(str) {
                     if (typeof str !== 'string') return str;
-                    return str.replace(/@?\{\{(step\d+)\.(\w+)\}\}/g, (match, stepKey, varName) => {
-                        return this.flowVariables[stepKey]?.[varName] ?? match;
+                    return str.replace(/@?\{\{(step\d+)\.([\w.]+)\}\}/g, (match, stepKey, varName) => {
+                        // Try flowVariables first (populated when step executes)
+                        const value = this.flowVariables[stepKey]?.[varName];
+                        if (value !== undefined && value !== null) return value;
+
+                        // Fallback: extract from previous run results if extractVariables is defined
+                        const stepNum = parseInt(stepKey.replace('step', ''));
+                        const step = this.newFlow?.steps?.[stepNum - 1];
+                        const result = this.flowRunResults?.[stepNum - 1];
+                        if (step?.extractVariables?.[varName] && result?.data) {
+                            try {
+                                const jsonPath = step.extractVariables[varName];
+                                const parts = jsonPath.replace(/^\$\.?/, '').split('.');
+                                let val = result.data;
+                                for (const part of parts) {
+                                    if (val == null) break;
+                                    val = val[part];
+                                }
+                                if (val !== undefined && val !== null) {
+                                    // Cache in flowVariables for next time
+                                    this.flowVariables[stepKey] = this.flowVariables[stepKey] || {};
+                                    this.flowVariables[stepKey][varName] = val;
+                                    return val;
+                                }
+                            } catch (e) { /* ignore extraction errors */ }
+                        }
+
+                        return match;
                     });
                 },
 
@@ -8899,6 +9481,68 @@
                     if (this.flowRunResults[stepIndex]) {
                         this.flowRunResults[stepIndex] = { ...this.flowRunResults[stepIndex], extractedVars: this.flowVariables[stepKey] };
                     }
+                    // Re-evaluate computed variables
+                    this.evaluateAndMergeComputedVariables(step, stepIndex);
+                },
+
+                // Evaluate a single computed expression, replacing @{{stepN.varName}} refs
+                evaluateComputedExpression(expression, allFlowVariables) {
+                    if (!expression || typeof expression !== 'string') return { value: undefined, error: 'Empty expression' };
+                    try {
+                        const expr = expression.replace(/@?\{\{(step\d+)\.([\w.]+)\}\}/g, (match, stepKey, varName) => {
+                            const val = allFlowVariables?.[stepKey]?.[varName];
+                            if (val === undefined || val === null) return 'undefined';
+                            if (typeof val === 'string') return JSON.stringify(val);
+                            return String(val);
+                        });
+                        const result = new Function('return ' + expr)();
+                        return { value: result, error: null };
+                    } catch (e) {
+                        return { value: undefined, error: e.message };
+                    }
+                },
+
+                // Evaluate all computed variables for a step and merge into flowVariables
+                evaluateAndMergeComputedVariables(step, stepIndex) {
+                    const computedVars = step.computedVariables || [];
+                    if (computedVars.length === 0) return;
+                    const stepKey = `step${stepIndex + 1}`;
+                    this.flowVariables[stepKey] = this.flowVariables[stepKey] || {};
+                    for (const cv of computedVars) {
+                        if (!cv.name) continue;
+                        const result = this.evaluateComputedExpression(cv.expression, this.flowVariables);
+                        if (!result.error && result.value !== undefined) {
+                            this.flowVariables[stepKey][cv.name] = result.value;
+                        }
+                    }
+                    // Update extractedVars display to include computed vars
+                    if (this.flowRunResults[stepIndex]) {
+                        this.flowRunResults[stepIndex] = { ...this.flowRunResults[stepIndex], extractedVars: { ...this.flowVariables[stepKey] } };
+                    }
+                },
+
+                // Update extraction paths when array index changes
+                updateExtractArrayIndex(step, oldIdx, newIdx) {
+                    if (!step.extractVariables || oldIdx === newIdx) return;
+                    const updated = {};
+                    const oldPrefix = `data.${oldIdx}.`;
+                    const newPrefix = `data.${newIdx}.`;
+                    for (const [name, path] of Object.entries(step.extractVariables)) {
+                        if (path.startsWith(oldPrefix)) {
+                            updated[name] = newPrefix + path.slice(oldPrefix.length);
+                        } else if (path === `data.${oldIdx}`) {
+                            updated[name] = `data.${newIdx}`;
+                        } else {
+                            updated[name] = path;
+                        }
+                    }
+                    step.extractVariables = updated;
+                },
+
+                // Derive variable name from field path: strip data prefix and array indices
+                // data.0.id → id | data.0.user.id → user.id | data.name → name | message → message
+                fieldVarName(path) {
+                    return path.replace(/^data\./, '').replace(/^\d+\./, '');
                 },
 
                 // Get value from object by dot-notation path
@@ -9039,6 +9683,7 @@
                         rawContentType: 'text/plain',
                         extractVariables: {},
                         assertions: [],
+                        computedVariables: [],
                         expectedResult: '',
                         expectedStatus: null
                     };
@@ -9120,13 +9765,13 @@
                                 params: {},
                                 headers: authHeader,
                                 body: {},
-                                extractVariables: { [`${depResource}_id`]: 'data.0.id', [`first_${depResource}`]: 'data.0' },
+                                extractVariables: { 'id': 'data.0.id' },
                                 expectedStatus: null
                             });
-                            
+
                             // Map all _id fields that come from this endpoint
                             deps.requires.filter(d => d.endpoint === dep.endpoint).forEach(d => {
-                                depVariableMap[d.field] = `@{{${depStepName}.${depResource}_id}}`;
+                                depVariableMap[d.field] = `@{{${depStepName}.id}}`;
                             });
                         });
                     }
@@ -10062,91 +10707,109 @@
 
                 // Export to Markdown documentation
                 exportToMarkdown() {
-                    let md = `# ${this.spec.info?.title || 'API Documentation'}\n\n`;
-                    md += `**Version:** ${this.spec.info?.version || '1.0.0'}\n\n`;
-                    md += `**Base URL:** \`${this.getBaseUrl()}\`\n\n`;
-                    if (this.spec.info?.description) {
-                        md += `${this.spec.info.description}\n\n`;
-                    }
-                    md += '---\n\n';
-                    md += '## Table of Contents\n\n';
+                    try {
+                        if (!this.spec || !this.endpointsByTag || Object.keys(this.endpointsByTag).length === 0) {
+                            this.showToast('No endpoints loaded. Please load an API spec first.', 'error');
+                            return;
+                        }
 
-                    // Generate TOC
-                    Object.keys(this.endpointsByTag).forEach(tag => {
-                        md += `- [${tag}](#${tag.toLowerCase().replace(/\s+/g, '-')})\n`;
-                    });
-                    md += '\n---\n\n';
+                        let md = `# ${this.spec.info?.title || 'API Documentation'}\n\n`;
+                        md += `**Version:** ${this.spec.info?.version || '1.0.0'}\n\n`;
+                        md += `**Base URL:** \`${this.getBaseUrl()}\`\n\n`;
+                        if (this.spec.info?.description) {
+                            md += `${this.spec.info.description}\n\n`;
+                        }
+                        md += '---\n\n';
+                        md += '## Table of Contents\n\n';
 
-                    // Group by tag
-                    Object.entries(this.endpointsByTag).forEach(([tag, endpoints]) => {
-                        md += `## ${tag}\n\n`;
-
-                        endpoints.forEach(ep => {
-                            const methodBadge = ep.method.toUpperCase();
-                            md += `### ${methodBadge} ${ep.path}\n\n`;
-                            if (ep.summary) md += `**${ep.summary}**\n\n`;
-                            if (ep.description) md += `${ep.description}\n\n`;
-
-                            // Authentication
-                            if (ep.security && ep.security.length > 0) {
-                                md += '**Authentication:** Required (Bearer Token)\n\n';
-                            }
-
-                            // Parameters
-                            const params = ep.parameters || [];
-                            const pathParams = params.filter(p => p.in === 'path');
-                            const queryParams = params.filter(p => p.in === 'query');
-
-                            if (pathParams.length > 0) {
-                                md += '**Path Parameters:**\n\n';
-                                md += '| Name | Type | Required | Description |\n';
-                                md += '|------|------|----------|-------------|\n';
-                                pathParams.forEach(p => {
-                                    md += `| \`${p.name}\` | ${p.schema?.type || 'string'} | ${p.required ? 'Yes' : 'No'} | ${p.description || '-'} |\n`;
-                                });
-                                md += '\n';
-                            }
-
-                            if (queryParams.length > 0) {
-                                md += '**Query Parameters:**\n\n';
-                                md += '| Name | Type | Required | Description |\n';
-                                md += '|------|------|----------|-------------|\n';
-                                queryParams.forEach(p => {
-                                    md += `| \`${p.name}\` | ${p.schema?.type || 'string'} | ${p.required ? 'Yes' : 'No'} | ${p.description || '-'} |\n`;
-                                });
-                                md += '\n';
-                            }
-
-                            // Request body
-                            const mdBodySchema = this.getRequestBodySchema(ep);
-                            if (mdBodySchema) {
-                                md += '**Request Body:**\n\n```json\n';
-                                const body = this.generateMockFromSchema(mdBodySchema);
-                                md += JSON.stringify(body, null, 2);
-                                md += '\n```\n\n';
-                            }
-
-                            // Responses
-                            if (ep.responses) {
-                                md += '**Responses:**\n\n';
-                                Object.entries(ep.responses).forEach(([code, resp]) => {
-                                    const statusText = this.getStatusText(code);
-                                    md += `- **${code} ${statusText}**: ${resp.description || ''}\n`;
-                                });
-                                md += '\n';
-                            }
-
-                            // Example cURL
-                            md += '**Example Request:**\n\n```bash\n';
-                            md += this.generateCurlForEndpoint(ep);
-                            md += '\n```\n\n';
-
-                            md += '---\n\n';
+                        // Generate TOC
+                        Object.keys(this.endpointsByTag).forEach(tag => {
+                            md += `- [${tag}](#${tag.toLowerCase().replace(/\s+/g, '-')})\n`;
                         });
-                    });
+                        md += '\n---\n\n';
 
-                    this.downloadFile(md, 'api-documentation.md', 'text/markdown');
-                    this.showToast('Markdown documentation downloaded');
+                        // Group by tag
+                        Object.entries(this.endpointsByTag).forEach(([tag, endpoints]) => {
+                            md += `## ${tag}\n\n`;
+
+                            endpoints.forEach(ep => {
+                                const methodBadge = ep.method.toUpperCase();
+                                md += `### ${methodBadge} ${ep.path}\n\n`;
+                                if (ep.summary) md += `**${ep.summary}**\n\n`;
+                                if (ep.description) md += `${ep.description}\n\n`;
+
+                                // Authentication
+                                if (ep.security && ep.security.length > 0) {
+                                    md += '**Authentication:** Required (Bearer Token)\n\n';
+                                }
+
+                                // Parameters
+                                const params = ep.parameters || [];
+                                const pathParams = params.filter(p => p.in === 'path');
+                                const queryParams = params.filter(p => p.in === 'query');
+
+                                if (pathParams.length > 0) {
+                                    md += '**Path Parameters:**\n\n';
+                                    md += '| Name | Type | Required | Description |\n';
+                                    md += '|------|------|----------|-------------|\n';
+                                    pathParams.forEach(p => {
+                                        md += `| \`${p.name}\` | ${p.schema?.type || 'string'} | ${p.required ? 'Yes' : 'No'} | ${p.description || '-'} |\n`;
+                                    });
+                                    md += '\n';
+                                }
+
+                                if (queryParams.length > 0) {
+                                    md += '**Query Parameters:**\n\n';
+                                    md += '| Name | Type | Required | Description |\n';
+                                    md += '|------|------|----------|-------------|\n';
+                                    queryParams.forEach(p => {
+                                        md += `| \`${p.name}\` | ${p.schema?.type || 'string'} | ${p.required ? 'Yes' : 'No'} | ${p.description || '-'} |\n`;
+                                    });
+                                    md += '\n';
+                                }
+
+                                // Request body
+                                try {
+                                    const mdBodySchema = this.getRequestBodySchema(ep);
+                                    if (mdBodySchema) {
+                                        md += '**Request Body:**\n\n```json\n';
+                                        const body = this.generateMockFromSchema(mdBodySchema);
+                                        md += JSON.stringify(body, null, 2) || '{}';
+                                        md += '\n```\n\n';
+                                    }
+                                } catch (bodyErr) {
+                                    md += '**Request Body:** _(schema could not be serialized)_\n\n';
+                                }
+
+                                // Responses
+                                if (ep.responses) {
+                                    md += '**Responses:**\n\n';
+                                    Object.entries(ep.responses).forEach(([code, resp]) => {
+                                        const statusText = this.getStatusText(code);
+                                        md += `- **${code} ${statusText}**: ${resp.description || ''}\n`;
+                                    });
+                                    md += '\n';
+                                }
+
+                                // Example cURL
+                                try {
+                                    md += '**Example Request:**\n\n```bash\n';
+                                    md += this.generateCurlForEndpoint(ep);
+                                    md += '\n```\n\n';
+                                } catch (curlErr) {
+                                    md += '**Example Request:** _(could not generate cURL)_\n\n';
+                                }
+
+                                md += '---\n\n';
+                            });
+                        });
+
+                        this.downloadFile(md, 'api-documentation.md', 'text/markdown');
+                        this.showToast('Markdown documentation downloaded');
+                    } catch (err) {
+                        console.error('exportToMarkdown error:', err);
+                        this.showToast('Failed to export Markdown: ' + (err.message || 'Unknown error'), 'error');
+                    }
                 },
 
                 // Generate cURL command for an endpoint
@@ -11927,11 +12590,69 @@
                                 placeholder="Bearer token"
                                 class="w-full mt-1 px-3 py-1.5 border border-ide-border rounded-lg bg-ide-surface text-sm text-ide-fg">
                         </div>
+                        <div>
+                            <label class="text-xs text-ide-muted">Login Endpoint</label>
+                            <select @change="updateEnvironment(env.id, 'loginPath', $event.target.value)"
+                                class="w-full mt-1 px-3 py-1.5 border border-ide-border rounded-lg bg-ide-surface text-sm text-ide-fg font-mono">
+                                <option value="" :selected="!env.loginPath">Auto-detect (first found)</option>
+                                <template x-for="lp in detectedLoginPaths" :key="lp.path">
+                                    <option :value="lp.path" :selected="env.loginPath === lp.path"
+                                        x-text="lp.path + (lp.summary ? ' - ' + lp.summary : lp.tags.length ? ' (' + lp.tags.join(', ') + ')' : '')"></option>
+                                </template>
+                            </select>
+                            <p class="text-[10px] text-ide-muted mt-1">Which login endpoint to use when authenticating in this environment</p>
+                        </div>
                     </div>
                 </template>
                 <button @click="addEnvironment()" class="w-full py-2 border-2 border-dashed border-ide-border rounded-lg text-ide-muted hover:border-blue-400 hover:text-blue-500 transition-colors text-sm">
                     + Add Environment
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Session Manager Panel -->
+    <div x-show="showSessionManager" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" @click.self="showSessionManager = false" x-cloak>
+        <div class="bg-ide-bg rounded-2xl shadow-xl w-full max-w-lg mx-4 max-h-[80vh] overflow-y-auto">
+            <div class="px-6 py-4 border-b border-ide-border flex items-center justify-between">
+                <h2 class="text-lg font-semibold text-ide-fg">Auth Sessions</h2>
+                <div class="flex items-center gap-2">
+                    <span class="text-xs text-ide-muted" x-text="authSessions.length + ' session' + (authSessions.length !== 1 ? 's' : '')"></span>
+                    <button @click="showSessionManager = false" class="text-gray-400 hover:text-ide-fg text-xl">&times;</button>
+                </div>
+            </div>
+            <div class="p-6 space-y-3">
+                <template x-for="session in authSessions" :key="session.id">
+                    <div class="border rounded-lg p-4 space-y-2 transition-colors" :class="getSessionColorClasses(session.color, 'pill') + ' border'">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" :class="getSessionColorClasses(session.color, 'dot')"></span>
+                                <span class="font-medium text-sm text-ide-fg" x-text="session.label"></span>
+                                <span x-show="activeSessionId === session.id" class="text-[10px] px-1.5 py-0.5 rounded-full bg-ide-primary/20 text-ide-primary">default</span>
+                            </div>
+                            <div class="flex items-center gap-1.5">
+                                <button x-show="activeSessionId !== session.id" @click="activeSessionId = session.id" class="text-[10px] px-2 py-0.5 rounded bg-ide-surface border border-ide-border text-ide-muted hover:text-ide-fg transition-colors">Set Default</button>
+                                <button @click="removeSession(session.id)" class="text-[10px] px-2 py-0.5 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors">Remove</button>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-ide-muted">
+                            <div x-show="session.email"><span class="opacity-60">Email:</span> <span x-text="session.email"></span></div>
+                            <div x-show="session.loginPath"><span class="opacity-60">Login:</span> <span class="font-mono" x-text="session.loginPath"></span></div>
+                            <div x-show="session.pathPrefix"><span class="opacity-60">Prefix:</span> <span class="font-mono" x-text="session.pathPrefix"></span></div>
+                            <div><span class="opacity-60">Token:</span> <code class="font-mono" x-text="session.token ? session.token.substring(0, 12) + '...' : 'none'"></code></div>
+                            <div x-show="session.loggedInAt"><span class="opacity-60">Logged in:</span> <span x-text="new Date(session.loggedInAt).toLocaleString()"></span></div>
+                        </div>
+                    </div>
+                </template>
+                <div x-show="authSessions.length === 0" class="text-center py-8 text-ide-muted">
+                    <svg class="w-12 h-12 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                    <p class="text-sm">No active sessions</p>
+                    <p class="text-xs mt-1">Use the Login button in the auth bar to authenticate</p>
+                </div>
+                <div x-show="authSessions.length > 0" class="pt-2 border-t border-ide-border flex justify-between items-center">
+                    <button @click="logout(); showSessionManager = false" class="text-xs text-red-400 hover:text-red-300 transition-colors">Clear All Sessions</button>
+                    <span class="text-[10px] text-ide-muted">Sessions persist across page reloads</span>
+                </div>
             </div>
         </div>
     </div>

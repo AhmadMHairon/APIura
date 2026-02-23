@@ -38,7 +38,7 @@ class SavedApiRequest extends Model
      */
     public function user(): BelongsTo
     {
-        return $this->belongsTo(config('apiura.user_model', 'App\\Models\\User'));
+        return $this->belongsTo(User::class);
     }
 
     /**

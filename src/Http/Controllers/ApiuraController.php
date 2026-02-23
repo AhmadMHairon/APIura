@@ -3,9 +3,9 @@
 namespace Apiura\Http\Controllers;
 
 use Apiura\Services\OpenApiExportService;
+use Illuminate\Routing\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -157,6 +157,7 @@ class ApiuraController extends Controller
         $zip = new \ZipArchive();
         $zip->open($zipPath, \ZipArchive::CREATE);
 
+        // 1. Generate separate markdown files per tag from spec
         $spec = $this->getSpec();
         if (! empty($spec)) {
             $byTag = $this->groupEndpointsByTag($spec);
@@ -168,6 +169,7 @@ class ApiuraController extends Controller
             }
         }
 
+        // 2. Generate database schema markdown
         $dbMd = $this->generateDatabaseMarkdown();
         $zip->addFromString('databases.md', $dbMd);
 
@@ -218,19 +220,29 @@ class ApiuraController extends Controller
                 $md .= "{$ep['description']}\n\n";
             }
 
+            // Parameters
             if (! empty($ep['parameters'])) {
                 $md .= "**Parameters:**\n\n";
                 $md .= "| Name | In | Type | Required | Description |\n";
                 $md .= "|------|----|------|----------|-------------|\n";
                 foreach ($ep['parameters'] as $param) {
                     $type = $param['schema']['type'] ?? '-';
+                    if (is_array($type)) {
+                        $type = implode(', ', $type);
+                    }
                     $required = ! empty($param['required']) ? 'Yes' : 'No';
                     $desc = $param['description'] ?? '-';
-                    $md .= "| {$param['name']} | {$param['in']} | {$type} | {$required} | {$desc} |\n";
+                    if (is_array($desc)) {
+                        $desc = json_encode($desc);
+                    }
+                    $name = is_array($param['name'] ?? '') ? json_encode($param['name']) : ($param['name'] ?? '-');
+                    $in = is_array($param['in'] ?? '') ? json_encode($param['in']) : ($param['in'] ?? '-');
+                    $md .= "| {$name} | {$in} | {$type} | {$required} | {$desc} |\n";
                 }
                 $md .= "\n";
             }
 
+            // Request Body
             if ($ep['requestBody']) {
                 $content = $ep['requestBody']['content']['application/json'] ?? null;
                 if ($content && isset($content['schema'])) {
@@ -239,6 +251,7 @@ class ApiuraController extends Controller
                 }
             }
 
+            // Responses
             if (! empty($ep['responses'])) {
                 $md .= "**Responses:**\n\n";
                 foreach ($ep['responses'] as $code => $resp) {
@@ -258,6 +271,7 @@ class ApiuraController extends Controller
         $database = DB::connection()->getDatabaseName();
         $prefix = $database . '.';
 
+        // Laravel 12 returns "database.table" format — filter to current DB and strip prefix
         $allTables = collect(Schema::getTableListing())
             ->filter(fn ($t) => str_starts_with($t, $prefix) || ! str_contains($t, '.'))
             ->map(fn ($t) => str_starts_with($t, $prefix) ? substr($t, strlen($prefix)) : $t)
@@ -293,6 +307,7 @@ class ApiuraController extends Controller
 
             $md .= "## `{$table}`\n\n";
 
+            // Columns table
             $md .= "| Column | Type | Nullable | Default |\n";
             $md .= "|--------|------|----------|---------|\n";
             foreach ($columns as $col) {
@@ -304,6 +319,7 @@ class ApiuraController extends Controller
             }
             $md .= "\n";
 
+            // Indexes
             if (! empty($indexes)) {
                 $md .= "**Indexes:**\n\n";
                 foreach ($indexes as $idx) {
@@ -315,6 +331,7 @@ class ApiuraController extends Controller
                 $md .= "\n";
             }
 
+            // Foreign Keys
             if (! empty($foreignKeys)) {
                 $md .= "**Foreign Keys:**\n\n";
                 foreach ($foreignKeys as $fk) {

@@ -15,17 +15,6 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | User Model
-    |--------------------------------------------------------------------------
-    |
-    | The fully qualified class name of your User model. Used for the
-    | user relationship on saved requests and comments.
-    |
-    */
-    'user_model' => env('APIURA_USER_MODEL', 'App\\Models\\User'),
-
-    /*
-    |--------------------------------------------------------------------------
     | OpenAPI Spec Path
     |--------------------------------------------------------------------------
     |

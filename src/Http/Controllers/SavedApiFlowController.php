@@ -6,9 +6,9 @@ use Apiura\Http\Requests\StoreSavedApiFlowRequest;
 use Apiura\Http\Requests\UpdateSavedApiFlowRequest;
 use Apiura\Http\Resources\SavedApiFlowResource;
 use Apiura\Models\SavedApiFlow;
+use Illuminate\Routing\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Routing\Controller;
 
 class SavedApiFlowController extends Controller
 {

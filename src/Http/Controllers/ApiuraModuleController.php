@@ -9,9 +9,9 @@ use Apiura\Models\ApiuraModule;
 use Apiura\Models\SavedApiFlow;
 use Apiura\Models\SavedApiRequest;
 use Apiura\Services\ModuleDuplicateDetectionService;
+use Illuminate\Routing\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Routing\Controller;
 
 class ApiuraModuleController extends Controller
 {
@@ -61,6 +61,7 @@ class ApiuraModuleController extends Controller
     {
         $data = $request->validated();
 
+        // Enforce max depth of 3 levels
         if (! empty($data['parent_id'])) {
             $parent = ApiuraModule::find($data['parent_id']);
             if ($parent && $parent->depth >= 2) {
@@ -70,6 +71,7 @@ class ApiuraModuleController extends Controller
             }
         }
 
+        // Auto-set sort_order
         $maxSort = ApiuraModule::where('parent_id', $data['parent_id'] ?? null)->max('sort_order');
         $data['sort_order'] = ($maxSort ?? -1) + 1;
 
@@ -103,6 +105,7 @@ class ApiuraModuleController extends Controller
     public function destroy(Request $request, ApiuraModule $module): JsonResponse
     {
         if ($request->boolean('delete_items')) {
+            // Recursively collect all module IDs (self + descendants)
             $moduleIds = collect([$module->id]);
             $children = $module->children;
             while ($children->isNotEmpty()) {
@@ -206,6 +209,7 @@ class ApiuraModuleController extends Controller
 
             if ($action === 'skip') {
                 $counts['skipped']++;
+
                 continue;
             }
 
@@ -248,10 +252,18 @@ class ApiuraModuleController extends Controller
 
         $total = $counts['imported'] + $counts['overwritten'] + $counts['copied'];
         $parts = [];
-        if ($counts['imported'] > 0) $parts[] = $counts['imported'].' new';
-        if ($counts['overwritten'] > 0) $parts[] = $counts['overwritten'].' overwritten';
-        if ($counts['copied'] > 0) $parts[] = $counts['copied'].' copied';
-        if ($counts['skipped'] > 0) $parts[] = $counts['skipped'].' skipped';
+        if ($counts['imported'] > 0) {
+            $parts[] = $counts['imported'].' new';
+        }
+        if ($counts['overwritten'] > 0) {
+            $parts[] = $counts['overwritten'].' overwritten';
+        }
+        if ($counts['copied'] > 0) {
+            $parts[] = $counts['copied'].' copied';
+        }
+        if ($counts['skipped'] > 0) {
+            $parts[] = $counts['skipped'].' skipped';
+        }
 
         return response()->json([
             'message' => "Imported {$total} item(s): ".implode(', ', $parts),
